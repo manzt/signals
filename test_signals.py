@@ -1,25 +1,25 @@
 from unittest.mock import MagicMock
 
-from signals import Signal, computed, effect, signal
+from signals import Signal, computed, effect
 
 
 def test_signal_return_value():
     v = [1, 2]
-    s = signal(v)
+    s = Signal(v)
     assert s.value == v
 
 
 def test_signal_inherits_from_Signal():
-    assert isinstance(signal(0), Signal)
+    assert isinstance(Signal(0), Signal)
 
 
 def test_signal_to_string():
-    s = signal(123)
+    s = Signal(123)
     assert str(s) == "123"
 
 
 def test_signal_notifies_other_listeners():
-    s = signal(0)
+    s = Signal(0)
     spy1 = MagicMock(side_effect=lambda: s.value)
     spy2 = MagicMock(side_effect=lambda: s.value)
     spy3 = MagicMock(side_effect=lambda: s.value)
@@ -41,18 +41,18 @@ def test_signal_notifies_other_listeners():
 
 
 def test_signal_peek():
-    s = signal(1)
+    s = Signal(1)
     assert s.peek() == 1
 
 
 def test_signal_peek_after_value_change():
-    s = signal(1)
+    s = Signal(1)
     s.value = 2
     assert s.peek() == 2
 
 
 def test_signal_peek_not_depend_on_surrounding_effect():
-    s = signal(1)
+    s = Signal(1)
     spy = MagicMock(lambda: s.peek())
 
     effect(spy)
@@ -63,7 +63,7 @@ def test_signal_peek_not_depend_on_surrounding_effect():
 
 
 def test_signal_peek_not_depend_on_surrounding_computed():
-    s = signal(1)
+    s = Signal(1)
     spy = MagicMock(lambda: s.peek())
     d = computed(spy)
 
@@ -77,7 +77,7 @@ def test_signal_peek_not_depend_on_surrounding_computed():
 
 def test_signal_subscribe():
     spy = MagicMock()
-    a = signal(1)
+    a = Signal(1)
 
     a.subscribe(spy)
     assert spy.call_count == 1
@@ -86,7 +86,7 @@ def test_signal_subscribe():
 
 def test_signal_subscribe_value_change():
     spy = MagicMock()
-    a = signal(1)
+    a = Signal(1)
 
     a.subscribe(spy)
 
@@ -97,7 +97,7 @@ def test_signal_subscribe_value_change():
 
 def test_signal_unsubscribe():
     spy = MagicMock()
-    a = signal(1)
+    a = Signal(1)
 
     dispose = a.subscribe(spy)
     dispose()
