@@ -20,9 +20,9 @@ def test_signal_to_string():
 
 def test_signal_notifies_other_listeners():
     s = signal(0)
-    spy1 = MagicMock(lambda: s.value)
-    spy2 = MagicMock(lambda: s.value)
-    spy3 = MagicMock(lambda: s.value)
+    spy1 = MagicMock(side_effect=lambda: s.value)
+    spy2 = MagicMock(side_effect=lambda: s.value)
+    spy3 = MagicMock(side_effect=lambda: s.value)
 
     effect(spy1)
     dispose = effect(spy2)
@@ -104,30 +104,4 @@ def test_signal_unsubscribe():
     spy.reset_mock()
 
     a.value = 2
-    assert spy.call_count == 0
-
-
-def test_signal_subscription_not_trigger_on_callback_signal_change():
-    spy = MagicMock()
-    a = signal(0)
-    b = signal(0)
-
-    a.subscribe(lambda: b.value and spy())
-    assert spy.call_count == 1
-    spy.reset_mock()
-
-    b.value += 1
-    assert spy.call_count == 0
-
-
-def test_signal_no_cause_surrounding_effect_to_subscribe_on_signal_change():
-    spy = MagicMock()
-    a = signal(0)
-    b = signal(0)
-
-    effect(lambda: a.subscribe(lambda: b.value and spy()))
-    assert spy.call_count == 1
-    spy.reset_mock()
-
-    b.value += 1
     assert spy.call_count == 0

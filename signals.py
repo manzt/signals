@@ -309,7 +309,7 @@ class Signal(typing.Generic[T]):
             if node == self._targets:
                 self._targets = next
 
-    def subscribe(self, fn: typing.Callable[[T], None]) -> typing.Callable[[], None]:
+    def subscribe(self, fn: typing.Callable[[T], typing.Any]) -> typing.Callable[[], None]:
         """Subscribe to changes in the signal.
 
         Parameters
