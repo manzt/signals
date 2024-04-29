@@ -148,3 +148,17 @@ def test_computed_notifies_listeners():
     dispose()
     a.value += 1
     assert spy.call_count == 3
+
+
+def test_computed_computed():
+    a = Signal(0)
+    b = Signal(0)
+    c = computed(lambda: a.value + b.value)
+    d = computed(lambda: c.value * 2)
+
+    assert d.value == 0
+
+    a.value += 1
+    b.value += 2
+
+    assert d.value == 6

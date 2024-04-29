@@ -5,7 +5,6 @@ from __future__ import annotations
 import typing
 
 __all__ = [
-    "signal",
     "computed",
     "effect",
     "untracked",
@@ -362,17 +361,6 @@ class Signal(typing.Generic[T]):
                     node = node._next_target
             finally:
                 end_batch()
-
-
-def signal(value: T) -> Signal[T]:
-    """Create a new plain signal.
-
-    Parameters
-    ----------
-    value : T
-        The initial value for the signal.
-    """
-    return Signal(value)
 
 
 def needs_to_recompute(target: Computed | Effect) -> bool:
