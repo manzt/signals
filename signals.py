@@ -31,7 +31,7 @@ TRACKING = 1 << 5
 class Node:
     """A linked list node used to track dependencies (sources) and dependents (targets).
 
-    Also used to remember the source's last version number that the target saw.
+    Used to remember the source's last version number that the target saw.
     """
 
     __slots__ = [
@@ -87,13 +87,13 @@ batch_iteration = 0
 global_version = 0
 
 
-def start_batch():
+def start_batch() -> None:
     """Start a batch of effects."""
     global batch_depth
     batch_depth += 1
 
 
-def end_batch():
+def end_batch() -> None:
     """End a batch of effects."""
     global batch_depth
     global batch_iteration
@@ -106,31 +106,30 @@ def end_batch():
     error = None
     has_error = False
 
-    while batched_effect is not None:
+    while batched_effect:
         effect = batched_effect
         batched_effect = None
         batch_iteration += 1
 
-        while effect is not None:
+        while effect:
             next_effect = effect._next_batched_effect
             effect._next_batched_effect = None
             effect._flags &= ~NOTIFIED
 
             if not (effect._flags & DISPOSED) and needs_to_recompute(effect):
                 try:
-                    effect._callback()  # Run the effect's callback
+                    effect._callback()
                 except Exception as err:
                     if not has_error:
                         error = err
-                        has_error = True  # Mark that an error occurred
+                        has_error = True
 
-            effect = next_effect  # Move to the next effect in the batch
+            effect = next_effect
 
-    batch_iteration = 0  # Reset batch iteration count
-    batch_depth -= 1  # Decrement the batch depth
+    batch_iteration = 0
+    batch_depth -= 1
 
-    if has_error and error is not None:
-        # If an error occurred, raise it
+    if has_error and error:
         raise error
 
 
@@ -237,7 +236,6 @@ def add_dependency(signal: Signal) -> Node | None:
         # `signal` is an existing dependency from a previous evaluation. Reuse it.
         node._version = 0
 
-        #
         # If `node` is not already the current tail of the dependency list (i.e.
         # there is a next node in the list), then make the `node` the new tail. e.g:
         #
@@ -249,7 +247,6 @@ def add_dependency(signal: Signal) -> Node | None:
         # { A <-> C <-> D <-> B }
         #                     ↑
         #                    tail (eval_context._sources)
-        #
         if node._next_source is not None:
             node._next_source._prev_source = node._prev_source
 
@@ -430,11 +427,9 @@ def cleanup_sources(target: Computed | Effect) -> None:
     node = target._sources
     head: Node | None = None
 
-    """
-    At this point, 'target._sources' points to the tail of the doubly-linked list.
-    It contains all existing sources and new sources in order of use.
-    Iterate backward until we find the head node while dropping old dependencies.
-    """
+    # At this point, 'target._sources' points to the tail of the doubly-linked list.
+    # It contains all existing sources and new sources in order of use.
+    # Iterate backward until we find the head node while dropping old dependencies.
     while node is not None:
         prev = node._prev_source
 
@@ -456,9 +451,8 @@ def cleanup_sources(target: Computed | Effect) -> None:
         if node._rollback_node is not None:
             node._rollback_node = None
 
-        node = prev  # Move backward through the list
+        node = prev
 
-    # Update the target's sources to the head node.
     target._sources = head
 
 
@@ -696,9 +690,8 @@ class Effect:
         cleanup_effect(self)
         prepare_sources(self)
 
-        start_batch()  # Inline the start batch
-        prev_context = eval_context
-        eval_context = self
+        start_batch()
+        prev_context, eval_context = eval_context, self
 
         return lambda: end_effect(self, prev_context)
 
