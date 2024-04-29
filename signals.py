@@ -118,7 +118,7 @@ def end_batch() -> None:
 
             if not (effect._flags & DISPOSED) and needs_to_recompute(effect):
                 try:
-                    effect._callback()
+                    effect()
                 except Exception as err:
                     if not has_error:
                         error = err
@@ -668,7 +668,7 @@ class Effect:
         self._next_batched_effect = None
         self._flags = TRACKING
 
-    def _callback(self):
+    def __call__(self):
         finish = self._start()
         try:
             if self._flags & DISPOSED or self._fn is None:
@@ -731,7 +731,7 @@ def effect(fn: EffectFn | None) -> typing.Callable[[], None]:
     """
     effect_instance = Effect(fn)
     try:
-        effect_instance._callback()
+        effect_instance()
     except Exception as err:
         effect_instance._dispose()
         raise err
