@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+import pytest
 
 from signals import Signal, computed, effect
 
@@ -67,6 +68,24 @@ def test_signal_peek_not_depend_on_surrounding_effect():
     assert spy.call_count == 1
 
 
+def test_basic_computed():
+    a = Signal("hello")
+    b = Signal("world")
+    c = computed(lambda: f"{a} {b}")
+
+    assert c.value == "hello world"
+
+    b.value = "foo"
+    assert c.value == "hello foo"
+
+
+def test_computed_is_readonly():
+    a = Signal(0)
+    b = computed(lambda: a.value + 1)
+    with pytest.raises(AttributeError):
+        b.value = 10
+
+
 def test_signal_peek_not_depend_on_surrounding_computed():
     s = Signal(1)
     spy = MagicMock(lambda: s.peek())
@@ -110,3 +129,21 @@ def test_signal_unsubscribe():
 
     a.value = 2
     assert spy.call_count == 0
+
+
+def test_computed_notifies_listeners():
+    a = Signal(0)
+    b = Signal(0)
+    c = computed(lambda: a.value + b.value)
+
+    spy = MagicMock(side_effect=lambda: c.value)
+    dispose = effect(spy)
+    assert spy.call_count == 1
+
+    a.value += 1
+    a.value += 1
+    assert spy.call_count == 3
+
+    dispose()
+    a.value += 1
+    assert spy.call_count == 3

@@ -259,7 +259,8 @@ def add_dependency(signal: Signal) -> Node | None:
             node._prev_source = eval_context._sources
             node._next_source = None
 
-            eval_context._sources._next_source = node
+            if eval_context._sources:
+                eval_context._sources._next_source = node
             eval_context._sources = node
 
         # We can assume that the currently evaluated effect / computed signal is already
@@ -368,12 +369,6 @@ class Signal(typing.Generic[T]):
                 end_batch()
 
 
-##
-# Create a new plain signal.
-#
-# @param value The initial value for the signal.
-# @returns A new signal.
-#
 def signal(value: T) -> Signal[T]:
     """Create a new plain signal.
 
@@ -486,7 +481,6 @@ class Computed(Signal[T]):
 
     def _refresh(self) -> bool:
         global eval_context
-        global global_version
 
         self._flags &= ~NOTIFIED
 
@@ -531,7 +525,7 @@ class Computed(Signal[T]):
         self._flags &= ~RUNNING
         return True
 
-    def _subscribe(self, node: Node):
+    def _subscribe(self, node: Node | None):
         if self._targets is None:
             self._flags |= OUTDATED | TRACKING
 
@@ -540,11 +534,13 @@ class Computed(Signal[T]):
                 node._source._subscribe(node)
                 node = node._next_source
 
-        super()._subscribe(node)
+        if node:
+            super()._subscribe(node)
 
-    def _unsubscribe(self, node: Node):
+    def _unsubscribe(self, node: Node | None):
         if self._targets is not None:
-            super()._unsubscribe(node)
+            if node:
+                super()._unsubscribe(node)
 
             if self._targets is None:
                 self._flags &= ~TRACKING
