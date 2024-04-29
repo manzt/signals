@@ -39,6 +39,11 @@ def test_signal_notifies_other_listeners():
     assert spy2.call_count == 1
     assert spy3.call_count == 2
 
+    s.value = 20
+    assert spy1.call_count == 3
+    assert spy2.call_count == 1
+    assert spy3.call_count == 3
+
 
 def test_signal_peek():
     s = Signal(1)

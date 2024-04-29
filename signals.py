@@ -309,7 +309,9 @@ class Signal(typing.Generic[T]):
             if node == self._targets:
                 self._targets = next
 
-    def subscribe(self, fn: typing.Callable[[T], typing.Any]) -> typing.Callable[[], None]:
+    def subscribe(
+        self, fn: typing.Callable[[T], typing.Any]
+    ) -> typing.Callable[[], None]:
         """Subscribe to changes in the signal.
 
         Parameters
@@ -654,7 +656,8 @@ def end_effect(self: Effect, prev_context: Computed | Effect | None = None):
     end_batch()
 
 
-EffectFn = typing.Callable[[], None | typing.Callable[[], None]]
+CleanupFn = typing.Callable[[], None]
+EffectFn = typing.Callable[[], None | CleanupFn]
 
 
 class Effect:
@@ -663,7 +666,7 @@ class Effect:
     __slots__ = ["_fn", "_cleanup", "_sources", "_next_batched_effect", "_flags"]
 
     _fn: EffectFn | None
-    _cleanup: typing.Callable[[], None] | None
+    _cleanup: CleanupFn | None
     _sources: Node | None
     _next_batched_effect: Effect | None
     _flags: int
