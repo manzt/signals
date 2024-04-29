@@ -219,7 +219,7 @@ def add_dependency(signal: Signal) -> Node | None:
             _rollback_node=node,
         )
 
-        if eval_context._sources is not None:
+        if eval_context._sources:
             eval_context._sources._next_source = node
 
         eval_context._sources = node
@@ -247,10 +247,10 @@ def add_dependency(signal: Signal) -> Node | None:
         # { A <-> C <-> D <-> B }
         #                     ↑
         #                    tail (eval_context._sources)
-        if node._next_source is not None:
+        if node._next_source:
             node._next_source._prev_source = node._prev_source
 
-            if node._prev_source is not None:
+            if node._prev_source:
                 node._prev_source._next_source = node._next_source
 
             node._prev_source = eval_context._sources
@@ -277,7 +277,7 @@ class Signal(typing.Generic[T]):
     _node: Node | None
     _targets: Node | None
 
-    def __init__(self, value: T | None = None):
+    def __init__(self, value: T | None = None) -> None:
         self._value = value
         self._version = 0
         self._node = None
@@ -287,25 +287,23 @@ class Signal(typing.Generic[T]):
     def _refresh(self) -> bool:
         return True
 
-    def _subscribe(self, node: Node):
+    def _subscribe(self, node: Node) -> None:
         if self._targets != node and node._prev_target is None:
             node._next_target = self._targets
-            if self._targets is not None:
+            if self._targets:
                 self._targets._prev_target = node
             self._targets = node
 
-    def _unsubscribe(self, node: Node):
-        if self._targets is not None:
-            prev = node._prev_target
-            next = node._next_target
-            if prev is not None:
-                prev._next_target = next
-                node._prev_target = None
-            if next is not None:
-                next._prev_target = prev
-                node._next_target = None
-            if node == self._targets:
-                self._targets = next
+    def _unsubscribe(self, node: Node) -> None:
+        if self._targets is None:
+            return
+        prev, next = node._prev_target, node._next_target
+        if prev:
+            prev._next_target, node._prev_target = next, None
+        if next:
+            next._prev_target, node._next_target = prev, None
+        if node == self._targets:
+            self._targets = next
 
     def subscribe(
         self, fn: typing.Callable[[T], typing.Any]
@@ -339,12 +337,12 @@ class Signal(typing.Generic[T]):
     def value(self) -> T:
         """Get the current value of the signal."""
         node = add_dependency(self)
-        if node is not None:
+        if node:
             node._version = self._version
         return self._value  # type: ignore
 
     @value.setter
-    def value(self, value: T):
+    def value(self, value: T) -> None:
         global global_version
         global batch_iteration
 
@@ -359,7 +357,7 @@ class Signal(typing.Generic[T]):
             start_batch()
             try:
                 node = self._targets
-                while node is not None:
+                while node:
                     node._target._notify()
                     node = node._next_target
             finally:
@@ -408,9 +406,9 @@ def prepare_sources(target: Computed | Effect) -> None:
     3. Point 'target._sources' to the tail of the doubly-linked list.
     """
     node = target._sources
-    while node is not None:
+    while node:
         rollback_node = node._source._node
-        if rollback_node is not None:
+        if rollback_node:
             node._rollback_node = rollback_node
 
         node._source._node = node
@@ -430,17 +428,17 @@ def cleanup_sources(target: Computed | Effect) -> None:
     # At this point, 'target._sources' points to the tail of the doubly-linked list.
     # It contains all existing sources and new sources in order of use.
     # Iterate backward until we find the head node while dropping old dependencies.
-    while node is not None:
+    while node:
         prev = node._prev_source
 
         # If the node was not reused, unsubscribe from change notifications and remove from the list.
         if node._version == -1:
             node._source._unsubscribe(node)
 
-            if prev is not None:
+            if prev:
                 prev._next_source = node._next_source
 
-            if node._next_source is not None:
+            if node._next_source:
                 node._next_source._prev_source = prev
         else:
             # The new head is the last node that wasn't removed/unsubscribed from the list.
@@ -448,7 +446,7 @@ def cleanup_sources(target: Computed | Effect) -> None:
 
         # Restore the node's previous context and clear the rollback node if it was set.
         node._source._node = node._rollback_node
-        if node._rollback_node is not None:
+        if node._rollback_node:
             node._rollback_node = None
 
         node = prev
@@ -466,7 +464,7 @@ class Computed(Signal[T]):
     _global_version: int
     _flags: int
 
-    def __init__(self, fn: typing.Callable[[], T]):
+    def __init__(self, fn: typing.Callable[[], T]) -> None:
         super().__init__(None)
         self._fn = fn
         self._sources = None
@@ -519,31 +517,31 @@ class Computed(Signal[T]):
         self._flags &= ~RUNNING
         return True
 
-    def _subscribe(self, node: Node | None):
+    def _subscribe(self, node: Node | None) -> None:
         if self._targets is None:
             self._flags |= OUTDATED | TRACKING
 
             node = self._sources
-            while node is not None:
+            while node:
                 node._source._subscribe(node)
                 node = node._next_source
 
         if node:
             super()._subscribe(node)
 
-    def _unsubscribe(self, node: Node | None):
-        if self._targets is not None:
+    def _unsubscribe(self, node: Node | None) -> None:
+        if self._targets:
             if node:
                 super()._unsubscribe(node)
 
             if self._targets is None:
                 self._flags &= ~TRACKING
                 node = self._sources
-                while node is not None:
+                while node:
                     node._source._unsubscribe(node)
                     node = node._next_source
 
-    def _notify(self):
+    def _notify(self) -> None:
         if not (self._flags & NOTIFIED):
             self._flags |= OUTDATED | NOTIFIED
             node = self._targets
@@ -568,7 +566,7 @@ class Computed(Signal[T]):
         return self._value  # type: ignore
 
     @value.setter
-    def value(self, value: T):
+    def value(self, value: T) -> None:
         raise AttributeError("Computed signals are read-only")
 
     def __repr__(self) -> str:
@@ -629,7 +627,7 @@ def dispose_effect(effect: Effect) -> None:
     cleanup_effect(effect)
 
 
-def end_effect(self: Effect, prev_context: Computed | Effect | None = None):
+def end_effect(self: Effect, prev_context: Computed | Effect | None) -> None:
     """End the evaluation of an effect."""
     global eval_context
     if eval_context != self:
@@ -661,14 +659,14 @@ class Effect:
     _next_batched_effect: Effect | None
     _flags: int
 
-    def __init__(self, fn: EffectFn | None):
+    def __init__(self, fn: EffectFn | None) -> None:
         self._fn = fn
         self._cleanup = None
         self._sources = None
         self._next_batched_effect = None
         self._flags = TRACKING
 
-    def __call__(self):
+    def __call__(self) -> None:
         finish = self._start()
         try:
             if self._flags & DISPOSED or self._fn is None:
@@ -680,7 +678,7 @@ class Effect:
         finally:
             finish()
 
-    def _start(self):
+    def _start(self) -> typing.Callable[[], None]:
         global eval_context
         if self._flags & RUNNING:
             raise RuntimeError("Cycle detected")
@@ -689,20 +687,18 @@ class Effect:
         self._flags &= ~DISPOSED
         cleanup_effect(self)
         prepare_sources(self)
-
         start_batch()
         prev_context, eval_context = eval_context, self
-
         return lambda: end_effect(self, prev_context)
 
-    def _notify(self):
+    def _notify(self) -> None:
         global batched_effect
         if not (self._flags & NOTIFIED):
             self._flags |= NOTIFIED
             self._next_batched_effect = batched_effect
             batched_effect = self
 
-    def _dispose(self):
+    def _dispose(self) -> None:
         self._flags |= DISPOSED
 
         if not (self._flags & RUNNING):
@@ -729,11 +725,11 @@ def effect(fn: EffectFn | None) -> typing.Callable[[], None]:
     Callable[[], None]
         A function for disposing the effect.
     """
-    effect_instance = Effect(fn)
+    effect = Effect(fn)
     try:
-        effect_instance()
+        effect()
     except Exception as err:
-        effect_instance._dispose()
+        effect._dispose()
         raise err
 
-    return effect_instance._dispose
+    return effect._dispose
