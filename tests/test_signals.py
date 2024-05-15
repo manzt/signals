@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-
 from signals import Signal, computed, effect
 
 
@@ -92,11 +91,11 @@ def test_signal_peek_not_depend_on_surrounding_computed():
     spy = MagicMock(lambda: s.peek())
     d = computed(spy)
 
-    d.value
+    d.value  # noqa: B018
     assert spy.call_count == 1
 
     s.value = 2
-    d.value
+    d.value  # noqa: B018
     assert spy.call_count == 1
 
 

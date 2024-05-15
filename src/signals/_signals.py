@@ -22,11 +22,11 @@ T = typing.TypeVar("T")
 
 
 def batch(fn: typing.Callable[[], T]) -> T:
-    """
-    Combine multiple value updates into one "commit" at the end of the provided callback.
+    """Combine multiple updates into one "commit" at the end of the provided callback.
 
-    Batches can be nested, and changes are only flushed once the outermost batch callback completes.
-    Accessing a signal that has been modified within a batch will reflect its updated value.
+    Batches can be nested, and changes are only flushed once the outermost batch
+    callback completes. Accessing a signal that has been modified within a batch
+    will reflect its updated value.
 
     Parameters
     ----------
@@ -80,7 +80,8 @@ class Signal(typing.Generic[T]):
     def __repr__(self) -> str:
         return f"Signal({self.value})"
 
-    # Recurse down all children, marking them as diry and adding listeners to batch_pending
+    # Recurse down all children, marking them as diry and adding
+    # listeners to batch_pending
     def _wakeup(self):
         for child_ref in self._children:
             child = child_ref()
@@ -162,7 +163,8 @@ class Computed(Signal[T]):
     # Whether the callback errored or not
     _has_error: bool
 
-    # Weakrefs has their own object identity, so we must reuse the same weakref over and over again
+    # Weakrefs has their own object identity, so we must reuse the same weakref
+    # over and over again
     _weak: weakref.ref[Signal | Computed]
 
     # The parent dependencies of this computed.
@@ -199,6 +201,7 @@ class Computed(Signal[T]):
 
     def peek(self) -> T:
         global current_computed
+
         if self._dirty:
             try:
                 changed = False
@@ -229,14 +232,15 @@ class Computed(Signal[T]):
                         current_computed = old
             except Exception as e:
                 self._has_error = True
-                # We reuse the _value slot for the error, instead of using a separate property
+                # We reuse the _value slot for the error, instead of using
+                # a separate property
                 self._value = typing.cast(T, e)
 
-            if self._has_error:
-                # We know that the value is an exception
-                raise self._value  # type: ignore
+        if self._has_error:
+            # We know that the value is an exception
+            raise self._value  # type: ignore
 
-            return self._value
+        return self._value
 
     @property
     def value(self) -> T:
@@ -287,6 +291,9 @@ class Effect(Computed[T]):
     def __init__(self, fn: typing.Callable[[], T]) -> None:
         self._listener = None
         super().__init__(fn)
+
+    def __repr__(self) -> str:
+        return f"Effect({self._callback})"
 
     def _wakeup(self):
         """Mark this effect as dirty whenever any of its parents change."""
