@@ -288,6 +288,9 @@ class Effect(Computed[T]):
         self._listener = None
         super().__init__(fn)
 
+    def __repr__(self) -> str:
+        return f"Effect({self._callback})"
+
     def _wakeup(self):
         """Mark this effect as dirty whenever any of its parents change."""
         global batch_pending

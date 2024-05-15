@@ -80,5 +80,3 @@ c = Counter(count=shared_count) # creates a signal internally
 # Updates b/c views because they share a signal, and have separate effects
 shared_count.value += 1
 ```
-
-
