@@ -26,7 +26,7 @@ print(c.value) # 4
 def print_a_or_b():
     print(a.value, b.value)
 
-# TODO: This is not working, but should...
+# Log the value of c whenever it changes
 @effect
 def print_c():
     print(c.value)

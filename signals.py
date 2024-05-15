@@ -3,134 +3,20 @@
 from __future__ import annotations
 
 import typing
+import weakref
 
-__all__ = [
-    "computed",
-    "effect",
-    "untracked",
-    "batch",
-    "Signal",
-    "Computed",
-    "Effect",
-]
+__all__ = ["Signal", "computed", "effect", "batch"]
 
-# An named symbol/brand for detecting Signal instances even when they weren't
-# created using the same signals library version.
-BRAND_SYMBOL = object()
+Disposer = typing.Callable[[], None]
+Listener = typing.Callable[[], None]
 
-# Flags for Computed and Effect.
-RUNNING = 1 << 0
-NOTIFIED = 1 << 1
-OUTDATED = 1 << 2
-DISPOSED = 1 << 3
-HAS_ERROR = 1 << 4
-TRACKING = 1 << 5
+# current computed that is running
+current_computed: Computed | None = None
 
+# a set of listeners which will be triggered after the batch is complete
+batch_pending: set[Listener] | None = None
 
-class Node:
-    """A linked list node used to track dependencies (sources) and dependents (targets).
-
-    Used to remember the source's last version number that the target saw.
-    """
-
-    __slots__ = [
-        "_source",
-        "_prev_source",
-        "_next_source",
-        "_target",
-        "_prev_target",
-        "_next_target",
-        "_version",
-        "_rollback_node",
-    ]
-
-    def __init__(
-        self,
-        _source: Signal,
-        _prev_source: Node | None,
-        _next_source: Node | None,
-        _target: Computed | Effect,
-        _prev_target: Node | None,
-        _next_target: Node | None,
-        _version: float,
-        _rollback_node: Node | None,
-    ):
-        # A source whose value the target depends on.
-        self._source = _source
-        self._prev_source = _prev_source
-        self._next_source = _next_source
-
-        # A target that depends on the source and should be notified when the source changes.
-        self._target = _target
-        self._prev_target = _prev_target
-        self._next_target = _next_target
-
-        # The version number of the source that target has last seen. We use version numbers
-        # instead of storing the source value, because source values can take arbitrary amount
-        # of memory, and computeds could hang on to them forever because they're lazily evaluated.
-        # Use the special value -1 to mark potentially unused but recyclable nodes.
-        self._version = _version
-
-        # Used to remember & roll back the source's previous `._node` value when entering &
-        # exiting a new evaluation context.
-        self._rollback_node = _rollback_node
-
-
-# Effects collected into a batch.
-batched_effect: Effect | None = None
-batch_depth = 0
-batch_iteration = 0
-
-# A global version number for signals, used for fast-pathing repeated
-# computed.peek()/computed.value calls when nothing has changed globally.
-global_version = 0
-
-
-def start_batch() -> None:
-    """Start a batch of effects."""
-    global batch_depth
-    batch_depth += 1
-
-
-def end_batch() -> None:
-    """End a batch of effects."""
-    global batch_depth
-    global batch_iteration
-    global batched_effect
-
-    if batch_depth > 1:
-        batch_depth -= 1
-        return
-
-    error = None
-    has_error = False
-
-    while batched_effect:
-        effect = batched_effect
-        batched_effect = None
-        batch_iteration += 1
-
-        while effect:
-            next_effect = effect._next_batched_effect
-            effect._next_batched_effect = None
-            effect._flags &= ~NOTIFIED
-
-            if not (effect._flags & DISPOSED) and needs_to_recompute(effect):
-                try:
-                    effect()
-                except Exception as err:
-                    if not has_error:
-                        error = err
-                        has_error = True
-
-            effect = next_effect
-
-    batch_iteration = 0
-    batch_depth -= 1
-
-    if has_error and error:
-        raise error
-
+processing_signals: set[Signal] = set()
 
 T = typing.TypeVar("T")
 
@@ -152,157 +38,97 @@ def batch(fn: typing.Callable[[], T]) -> T:
     T
         The value returned by the callback function.
     """
-    if batch_depth > 0:
+    global batch_pending
+    global processing_signals
+
+    if batch_pending is None:
+        listeners = set()
+        old = batch_pending
+        batch_pending = listeners
+
+        try:
+            return fn()
+        finally:
+            batch_pending = old
+            processing_signals.clear()
+
+            # trigger any pending listeners
+            for listener in listeners:
+                listener()
+    else:
         return fn()
 
-    start_batch()
-    try:
-        return fn()
-    finally:
-        end_batch()
 
-
-# Currently evaluated computed or effect.
-eval_context: Computed | Effect | None = None
-
-
-def untracked(fn: typing.Callable[[], T]) -> T:
-    """Run a callback function that can access signal values without subscribing to the signal updates.
-
-    Parameters
-    ----------
-    fn : Callable[[], T]
-        The callback function.
-
-    Returns
-    -------
-    T
-        The value returned by the callback.
-    """
-    global eval_context
-    prev_context = eval_context
-    eval_context = None
-    try:
-        return fn()
-    finally:
-        eval_context = prev_context
-
-
-def add_dependency(signal: Signal) -> Node | None:
-    """Add a dependency to the currently evaluated effect or computed signal."""
-    if eval_context is None:
-        return None
-
-    node = signal._node
-
-    if node is None or node._target != eval_context:
-        #
-        # `signal` is a new dependency. Create a new dependency node, and set it
-        # as the tail of the current context's dependency list. e.g:
-        #
-        # { A <-> B       }
-        #         ↑     ↑
-        #        tail  node (new)
-        #               ↓
-        # { A <-> B <-> C }
-        #               ↑
-        #              tail (eval_context._sources)
-        node = Node(
-            _version=0,
-            _source=signal,
-            _prev_source=eval_context._sources,
-            _next_source=None,
-            _target=eval_context,
-            _prev_target=None,
-            _next_target=None,
-            _rollback_node=node,
-        )
-
-        if eval_context._sources:
-            eval_context._sources._next_source = node
-
-        eval_context._sources = node
-        signal._node = node
-
-        # Subscribe to change notifications from this dependency if we're in an effect
-        # OR evaluating a computed signal that in turn has subscribers.
-        if eval_context._flags & TRACKING:
-            signal._subscribe(node)
-
-        return node
-
-    elif node._version == -1:
-        # `signal` is an existing dependency from a previous evaluation. Reuse it.
-        node._version = 0
-
-        # If `node` is not already the current tail of the dependency list (i.e.
-        # there is a next node in the list), then make the `node` the new tail. e.g:
-        #
-        # { A <-> B <-> C <-> D }
-        #         ↑           ↑
-        #        node   ┌─── tail (eval_context._sources)
-        #         └─────│─────┐
-        #               ↓     ↓
-        # { A <-> C <-> D <-> B }
-        #                     ↑
-        #                    tail (eval_context._sources)
-        if node._next_source:
-            node._next_source._prev_source = node._prev_source
-
-            if node._prev_source:
-                node._prev_source._next_source = node._next_source
-
-            node._prev_source = eval_context._sources
-            node._next_source = None
-
-            if eval_context._sources:
-                eval_context._sources._next_source = node
-            eval_context._sources = node
-
-        # We can assume that the currently evaluated effect / computed signal is already
-        # subscribed to change notifications from `signal` if needed.
-        return node
-
-    return None
-
-
-# The base class for plain and computed signals
 class Signal(typing.Generic[T]):
     """Represents a signal that can be subscribed to for changes in value."""
 
-    __slots__ = ["_value", "_version", "_node", "_targets", "brand"]
-    _value: T | None
-    _version: int
-    _node: Node | None
-    _targets: Node | None
+    __slots__ = ["_value", "_children", "__weakref__"]
 
-    def __init__(self, value: T | None = None) -> None:
+    _value: T
+
+    # Uses weak references to avoid memory leaks
+    # If the child is not used anywhere, then it can be garbage collected
+    _children: set[weakref.ref[Signal]]
+
+    def __init__(self, value: T) -> None:
         self._value = value
-        self._version = 0
-        self._node = None
-        self._targets = None
-        self.brand = BRAND_SYMBOL
+        self._children = set()
 
-    def _refresh(self) -> bool:
-        return True
+    def __str__(self) -> str:
+        return f"{self.value}"
 
-    def _subscribe(self, node: Node) -> None:
-        if self._targets != node and node._prev_target is None:
-            node._next_target = self._targets
-            if self._targets:
-                self._targets._prev_target = node
-            self._targets = node
+    def __repr__(self) -> str:
+        return f"Signal({self.value})"
 
-    def _unsubscribe(self, node: Node) -> None:
-        if self._targets is None:
-            return
-        prev, next = node._prev_target, node._next_target
-        if prev:
-            prev._next_target, node._prev_target = next, None
-        if next:
-            next._prev_target, node._next_target = prev, None
-        if node == self._targets:
-            self._targets = next
+    # Recurse down all children, marking them as diry and adding listeners to batch_pending
+    def _wakeup(self):
+        for child_ref in self._children:
+            child = child_ref()
+            if child is not None:
+                child._wakeup()
+            else:
+                # If the child has been garbage collected, remove it from the set
+                self._children.remove(child_ref)
+
+    def peek(self):
+        """Get the current value of the signal without subscribing to changes."""
+        return self._value
+
+    @property
+    def value(self) -> T:
+        """Get the current value of the signal."""
+        global current_computed
+        global batch_pending
+
+        value = self._value
+        if current_computed is not None:
+            # this is ued to detect infinite cycles
+            if batch_pending is not None:
+                processing_signals.add(self)
+
+            # if accessing inside of a computed, add this to the computed's parents
+            current_computed._add_dependency(self, value)
+
+        return value
+
+    @value.setter
+    def value(self, value: T) -> None:
+        global current_computed
+        global batch_pending
+        global processing_signals
+
+        if (
+            current_computed is not None
+            and batch_pending is not None
+            and self in processing_signals
+        ):
+            raise RuntimeError("Cycle detected")
+
+        self._value = value
+
+        # If the value is set outside of a batch, this ensures that all of the
+        # children will be fully marked as dirty before triggering any listeners
+        batch(lambda: self._wakeup())
 
     def subscribe(
         self, fn: typing.Callable[[T], typing.Any]
@@ -321,244 +147,115 @@ class Signal(typing.Generic[T]):
         """
         return effect(lambda: fn(self.value))
 
-    def __repr__(self) -> str:
-        return f"Signal({self.value})"
-
-    def __str__(self) -> str:
-        """Return the string representation of the signal's value."""
-        return str(self.value)
-
-    def peek(self) -> T:
-        """Get the current value of the signal without subscribing to changes."""
-        return self.value
-
-    @property
-    def value(self) -> T:
-        """Get the current value of the signal."""
-        node = add_dependency(self)
-        if node:
-            node._version = self._version
-        return self._value  # type: ignore
-
-    @value.setter
-    def value(self, value: T) -> None:
-        global global_version
-        global batch_iteration
-
-        if value != self._value:
-            if batch_iteration > 100:
-                raise RuntimeError("Cycle detected")
-
-            self._value = value
-            self._version += 1
-            global_version += 1
-
-            start_batch()
-            try:
-                node = self._targets
-                while node:
-                    node._target._notify()
-                    node = node._next_target
-            finally:
-                end_batch()
-
-
-def needs_to_recompute(target: Computed | Effect) -> bool:
-    """Determine if a computed signal needs to recompute its value."""
-    # Check the dependencies for changed values. The dependency list is already
-    # in order of use. Therefore if multiple dependencies have changed values, only
-    # the first used dependency is re-evaluated at this point.
-    node = target._sources
-    while node is not None:
-        # If there's a new version of the dependency before or after refreshing,
-        # or the dependency has something blocking it from refreshing at all,
-        # then recomputation is required.
-        if (
-            node._source._version != node._version
-            or not node._source._refresh()
-            or node._source._version != node._version
-        ):
-            return True
-
-        node = node._next_source
-
-    # If none of the dependencies have changed values, recomputation is not required.
-    return False
-
-
-def prepare_sources(target: Computed | Effect) -> None:
-    """Prepare sources for a target in a doubly linked list.
-
-    1. Mark all current sources as reusable nodes (version: -1).
-    2. Set a rollback node if the current node is used in a different context.
-    3. Point 'target._sources' to the tail of the doubly-linked list.
-    """
-    node = target._sources
-    while node:
-        rollback_node = node._source._node
-        if rollback_node:
-            node._rollback_node = rollback_node
-
-        node._source._node = node
-        node._version = -1
-        if node._next_source is None:
-            target._sources = node
-            break
-
-        node = node._next_source
-
-
-def cleanup_sources(target: Computed | Effect) -> None:
-    """Clean up sources for a target in a doubly linked list."""
-    node = target._sources
-    head: Node | None = None
-
-    # At this point, 'target._sources' points to the tail of the doubly-linked list.
-    # It contains all existing sources and new sources in order of use.
-    # Iterate backward until we find the head node while dropping old dependencies.
-    while node:
-        prev = node._prev_source
-
-        # If the node was not reused, unsubscribe from change notifications and remove from the list.
-        if node._version == -1:
-            node._source._unsubscribe(node)
-
-            if prev:
-                prev._next_source = node._next_source
-
-            if node._next_source:
-                node._next_source._prev_source = prev
-        else:
-            # The new head is the last node that wasn't removed/unsubscribed from the list.
-            head = node
-
-        # Restore the node's previous context and clear the rollback node if it was set.
-        node._source._node = node._rollback_node
-        if node._rollback_node:
-            node._rollback_node = None
-
-        node = prev
-
-    target._sources = head
-
 
 class Computed(Signal[T]):
     """Represents a signal whose value is derived from other signals."""
 
-    __slots__ = ["_fn", "_sources", "_global_version", "_flags"]
+    __slots__ = ["_first", "_dirty", "_has_error", "_weak", "_parents", "_callback"]
 
-    _fn: typing.Callable[[], T]
-    _sources: Node | None
-    _global_version: int
-    _flags: int
+    # Whether this is the first time processing the computed
+    _first: bool
 
-    def __init__(self, fn: typing.Callable[[], T]) -> None:
-        super().__init__(None)
-        self._fn = fn
-        self._sources = None
-        self._global_version = global_version - 1
-        self._flags = OUTDATED
+    # Whether any of the computed's parents have changed or not
+    _dirty: bool
 
-    def _refresh(self) -> bool:
-        global eval_context
+    # Whether the callback errored or not
+    _has_error: bool
 
-        self._flags &= ~NOTIFIED
+    # Weakrefs has their own object identity, so we must reuse the same weakref over and over again
+    _weak: weakref.ref[Signal | Computed]
 
-        if self._flags & RUNNING:
-            return False
+    # The parent dependencies of this computed.
+    _parents: dict[Signal, typing.Any]
 
-        # If this computed signal has subscribed to updates from its dependencies
-        # (TRACKING flag set) and none of them have notified about changes (OUTDATED
-        # flag not set), then the computed value can't have changed.
-        if (self._flags & (OUTDATED | TRACKING)) == TRACKING:
-            return True
+    _callback: typing.Callable[[], T]
 
-        self._flags &= ~OUTDATED
+    def __init__(self, callback: typing.Callable[[], T]) -> None:
+        super().__init__(typing.cast(T, None))
+        self._first = True
+        self._dirty = True
+        self._has_error = False
+        self._weak = weakref.ref(self)
+        self._parents = {}
+        self._callback = callback
 
-        if self._global_version == global_version:
-            return False
+    def _wakeup(self):
+        """Mark this computed as dirty whenever any of its parents change."""
+        self._dirty = True
+        super()._wakeup()
 
-        self._global_version = global_version
+    def _add_dependency(self, parent: Signal, value: typing.Any) -> None:
+        """Add the Signal as a dependency of this computed.
 
-        # Mark this computed signal running before checking the dependencies for value
-        # changes, so that the RUNNING flag can be used to notice cyclical dependencies.
-        self._flags |= RUNNING
-        if self._version > 0 and not needs_to_recompute(self):
-            self._flags &= ~RUNNING
-            return True
+        Called when another Signal's .value is accessed inside of this computed.
+        """
+        self._parents[parent] = value
+        parent._children.add(self._weak)
 
-        prev_context = eval_context
-        try:
-            prepare_sources(self)
-            eval_context = self
-            value = self._fn()
-            if self._flags & HAS_ERROR or self._value != value or self._version == 0:
-                self._value = value
-                self._version += 1
-                self._flags &= ~HAS_ERROR
-        except Exception as err:
-            self._value = err  # type: ignore
-            self._flags |= HAS_ERROR
-            self._version += 1
-        eval_context = prev_context
-        cleanup_sources(self)
-        self._flags &= ~RUNNING
-        return True
+    def _remove_dependencies(self):
+        """Remove all links between this computed and its dependencies."""
+        for parent in self._parents:
+            parent._children.remove(self._weak)
 
-    def _subscribe(self, node: Node | None) -> None:
-        if self._targets is None:
-            self._flags |= OUTDATED | TRACKING
+    def peek(self) -> T:
+        global current_computed
+        if self._dirty:
+            try:
+                changed = False
+                if self._first:
+                    self._first = False
+                    changed = True
+                else:
+                    for parent, old_value in self._parents.items():
+                        new_value = parent.peek()
+                        if old_value != new_value:
+                            changed = True
 
-            node = self._sources
-            while node:
-                node._source._subscribe(node)
-                node = node._next_source
+                if changed:
+                    self._has_error = False
+                    # Because the dependencies might have changed, we first
+                    # remove all of the old links between this computed and
+                    # its dependencies.
+                    #
+                    # The links will be recreated by the _addDependency method.
+                    self._remove_dependencies()
 
-        if node:
-            super()._subscribe(node)
+                    old = current_computed
+                    current_computed = self
 
-    def _unsubscribe(self, node: Node | None) -> None:
-        if self._targets:
-            if node:
-                super()._unsubscribe(node)
+                    try:
+                        self._value = self._callback()
+                    finally:
+                        current_computed = old
+            except Exception as e:
+                self._has_error = True
+                # We reuse the _value slot for the error, instead of using a separate property
+                self._value = typing.cast(T, e)
 
-            if self._targets is None:
-                self._flags &= ~TRACKING
-                node = self._sources
-                while node:
-                    node._source._unsubscribe(node)
-                    node = node._next_source
+            if self._has_error:
+                # We know that the value is an exception
+                raise self._value  # type: ignore
 
-    def _notify(self) -> None:
-        if not (self._flags & NOTIFIED):
-            self._flags |= OUTDATED | NOTIFIED
-            node = self._targets
-            while node is not None:
-                node._target._notify()
-                node = node._next_target
+            return self._value
 
     @property
     def value(self) -> T:
-        if self._flags & RUNNING:
-            raise RuntimeError("Cycle detected")
+        """Get the current value of the computed."""
+        global current_computed
+        value = self.peek()
 
-        node = add_dependency(self)
-        self._refresh()
+        if current_computed is not None:
+            # If accessing inside of a computed, add this to the computed's parents
+            current_computed._add_dependency(self, value)
 
-        if node is not None:
-            node._version = self._version
-
-        if self._flags & HAS_ERROR:
-            raise typing.cast(Exception, self._value)
-
-        return self._value  # type: ignore
+        return value
 
     @value.setter
     def value(self, value: T) -> None:
-        raise AttributeError("Computed signals are read-only")
+        raise AttributeError("Computed singals are read-only")
 
     def __repr__(self) -> str:
-        return f"ReadonlySignal({self.value})"
+        return f"Computed({self._callback})"
 
 
 def computed(fn: typing.Callable[[], T]) -> Computed[T]:
@@ -580,120 +277,50 @@ def computed(fn: typing.Callable[[], T]) -> Computed[T]:
     return Computed(fn)
 
 
-def cleanup_effect(effect: Effect) -> None:
-    """Run cleanup functions for an effect."""
-    global eval_context
-    cleanup = effect._cleanup
-    effect._cleanup = None
-    if callable(cleanup):
-        start_batch()
-        # Run cleanup functions always outside of any context.
-        prev_context = eval_context
-        eval_context = None
-        try:
-            cleanup()
-        except Exception as err:
-            effect._flags &= ~RUNNING
-            effect._flags |= DISPOSED
-            dispose_effect(effect)
-            raise err
-        finally:
-            eval_context = prev_context
-            end_batch()
-
-
-def dispose_effect(effect: Effect) -> None:
-    """Dispose an effect."""
-    node = effect._sources
-    while node is not None:
-        node._source._unsubscribe(node)
-        node = node._next_source
-
-    effect._fn = None
-    effect._sources = None
-
-    cleanup_effect(effect)
-
-
-def end_effect(self: Effect, prev_context: Computed | Effect | None) -> None:
-    """End the evaluation of an effect."""
-    global eval_context
-    if eval_context != self:
-        raise RuntimeError("Out-of-order effect")
-
-    cleanup_sources(self)
-    eval_context = prev_context
-
-    self._flags &= ~RUNNING
-
-    if self._flags & DISPOSED:
-        dispose_effect(self)
-
-    end_batch()
-
-
-CleanupFn = typing.Callable[[], None]
-EffectFn = typing.Callable[[], None | CleanupFn]
-
-
-class Effect:
+class Effect(Computed[T]):
     """Represents a side-effect that runs in response to signal changes."""
 
-    __slots__ = ["_fn", "_cleanup", "_sources", "_next_batched_effect", "_flags"]
+    __slots__ = ["_listener"]
 
-    _fn: EffectFn | None
-    _cleanup: CleanupFn | None
-    _sources: Node | None
-    _next_batched_effect: Effect | None
-    _flags: int
+    _listener: Listener | None
 
-    def __init__(self, fn: EffectFn | None) -> None:
-        self._fn = fn
-        self._cleanup = None
-        self._sources = None
-        self._next_batched_effect = None
-        self._flags = TRACKING
+    def __init__(self, fn: typing.Callable[[], T]) -> None:
+        self._listener = None
+        super().__init__(fn)
 
-    def __call__(self) -> None:
-        finish = self._start()
-        try:
-            if self._flags & DISPOSED or self._fn is None:
-                return
+    def _wakeup(self):
+        """Mark this effect as dirty whenever any of its parents change."""
+        global batch_pending
 
-            cleanup = self._fn()
-            if callable(cleanup):
-                self._cleanup = cleanup
-        finally:
-            finish()
+        if batch_pending is None:
+            raise RuntimeError("invalid batch_pending")
 
-    def _start(self) -> typing.Callable[[], None]:
-        global eval_context
-        if self._flags & RUNNING:
-            raise RuntimeError("Cycle detected")
+        if self._listener is not None:
+            batch_pending.add(self._listener)
 
-        self._flags |= RUNNING
-        self._flags &= ~DISPOSED
-        cleanup_effect(self)
-        prepare_sources(self)
-        start_batch()
-        prev_context, eval_context = eval_context, self
-        return lambda: end_effect(self, prev_context)
+        super()._wakeup()
 
-    def _notify(self) -> None:
-        global batched_effect
-        if not (self._flags & NOTIFIED):
-            self._flags |= NOTIFIED
-            self._next_batched_effect = batched_effect
-            batched_effect = self
+    def _listen(self, callback: typing.Callable[[T], None]) -> Disposer:
+        old_value = self.value
 
-    def _dispose(self) -> None:
-        self._flags |= DISPOSED
+        def listener():
+            nonlocal old_value
+            new_value = self.value
+            if old_value != new_value:
+                old_value = new_value
+                callback(old_value)
 
-        if not (self._flags & RUNNING):
-            dispose_effect(self)
+        self._listener = listener
+        callback(old_value)
+
+        def dispose():
+            self._listener = None
+            self._remove_dependencies()
+
+        return dispose
 
 
-def effect(fn: EffectFn | None) -> typing.Callable[[], None]:
+def effect(fn: typing.Callable[[], None]) -> Disposer:
     """Create an effect to run arbitrary code in response to signal changes.
 
     An effect tracks which signals are accessed within the given callback
@@ -713,11 +340,4 @@ def effect(fn: EffectFn | None) -> typing.Callable[[], None]:
     Callable[[], None]
         A function for disposing the effect.
     """
-    effect = Effect(fn)
-    try:
-        effect()
-    except Exception as err:
-        effect._dispose()
-        raise err
-
-    return effect._dispose
+    return Effect(lambda: batch(fn))._listen(lambda _: None)
