@@ -28,18 +28,11 @@ class SignalMagics(Magics):
         help=("Name of the signal effect widget. " " (default = _last_signal_effect)."),
     )
     @argument(
-        "-d",
-        "--debug",
-        action="store_true",
-        default=False,
-        help="Show debug information in the JS console.",
-    )
-    @argument(
         "-c",
         "--cleanup",
         action="store_true",
         default=False,
-        help="Destroy the previous widget before creating a new one.",
+        help="Destroy the previous effect before creating a new one.",
     )
     @cell_magic
     def effect(self, line, cell, local_ns):
@@ -52,18 +45,12 @@ class SignalMagics(Magics):
             widget.close()
 
         output = ipywidgets.Output()
-        shell = typing.cast("InteractiveShell", self.shell)
 
         @output.capture(clear_output=True)
         def run():
-            exec(
-                shell.transform_cell(cell),
-                shell.user_global_ns,
-                shell.user_ns,
-            )
+            typing.cast("InteractiveShell", self.shell).run_cell(cell)
 
-        cleanup = _effect(run)
-        local_ns[args.name] = (cleanup, output)
+        local_ns[args.name] = (_effect(run), output)
         display(output)
 
 
