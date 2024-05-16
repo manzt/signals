@@ -38,6 +38,36 @@ def print_c():
 a.value = 2 # prints (2, 3) and 5
 ```
 
+## cell magic
+
+we also provide a ipython cell magic `%%effect`, which offers a convenient way
+re-execute cells that use signals.
+
+`In[1]:`
+
+```python
+%load_ext signals
+from signals import Signal, computed
+
+a = Signal(0)
+b = Signal(2)
+c = computed(lambda: a.value + b.value)
+```
+
+`In[2]:`
+
+```python
+%%effect
+c.value # re-evaluates the cell whenever a or b changes
+```
+
+`In[3]:`
+
+```python
+a.value = 1
+```
+
+
 ## what
 
 Signals are a declarative programming model for updating based on fine-grained
