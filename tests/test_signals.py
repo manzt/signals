@@ -175,9 +175,11 @@ def test_explicit_dependencies():
         # We want to make sure the effect works even if bv is never accessed
         spy(av if True else _)
 
+    spy.assert_called_once()
     spy.assert_called_with(42)
     spy.reset_mock()
     b.value = 10
+    spy.assert_called_once()
     spy.assert_called_with(42)
 
 
@@ -194,4 +196,4 @@ def test_explicit_dependencies_deferred():
 
     spy.assert_not_called()
     a.value = 1
-    spy.assert_not_called()
+    spy.assert_called_once_with(1, 35)
