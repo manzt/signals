@@ -171,12 +171,14 @@ def test_explicit_dependencies():
 
     @effect
     @on(deps=(a, b))
-    def _(av, bv):
-        spy(av, bv)
+    def _(av, _):
+        # We want to make sure the effect works even if bv is never accessed
+        spy(av if True else _)
 
-    spy.assert_called_with(42, 35)
-    a.value = 1
-    spy.assert_called_with(1, 35)
+    spy.assert_called_with(42)
+    spy.reset_mock()
+    b.value = 10
+    spy.assert_called_with(42)
 
 
 def test_explicit_dependencies_deferred():
