@@ -42,18 +42,17 @@ re-execute cells that use signals.
 
 ```python
 %load_ext signals
-from signals import Signal, computed
+from signals import Signal
 
 a = Signal(0)
 b = Signal(2)
-c = computed(lambda: a.value + b.value)
 ```
 
 `In[2]:`
 
 ```python
 %%effect
-c.value # re-evaluates the cell whenever a or b changes
+a.value + b.value # re-evaluates the cell whenever a or b changes
 ```
 
 `In[3]:`
