@@ -1,14 +1,19 @@
 """A signals implementation for Python."""
 
-import importlib.metadata
-
-from ._signals import Signal, batch, computed, effect  # noqa: F401
-
-__version__ = importlib.metadata.version("signals")
+from ._signals import Signal, batch, computed, effect
+from ._version import __version__
 
 
 def load_ipython_extension(ipython):
-    """Load the IPython extension."""
-    from ._cellmagic import load_ipython_extension
+    """Load the IPython extension.
 
-    load_ipython_extension(ipython)
+    `%load_ext signals` will load the extension and enable the `%%effect` cell magic.
+
+    Parameters
+    ----------
+    ipython : IPython.core.interactiveshell.InteractiveShell
+        The IPython shell instance.
+    """
+    from ._cellmagic import SignalsMagics
+
+    ipython.register_magics(SignalsMagics)

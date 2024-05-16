@@ -259,7 +259,7 @@ class Computed(Signal[T]):
         raise AttributeError("Computed singals are read-only")
 
     def __repr__(self) -> str:
-        return f"Computed({self._callback})"
+        return f"Computed({self.value})"
 
 
 def computed(fn: typing.Callable[[], T]) -> Computed[T]:
@@ -293,7 +293,7 @@ class Effect(Computed[T]):
         super().__init__(fn)
 
     def __repr__(self) -> str:
-        return f"Effect({self._callback})"
+        return f"Effect({self.value})"
 
     def _wakeup(self):
         """Mark this effect as dirty whenever any of its parents change."""
