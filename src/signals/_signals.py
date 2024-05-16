@@ -350,7 +350,7 @@ def effect(fn: typing.Callable[[], None]) -> Disposer:
     return Effect(lambda: batch(fn))._listen(lambda _: None)
 
 
-def on(deps: typing.Sequence, defer: bool = False):
+def on(deps: typing.Sequence[Signal], defer: bool = False):
     """Make dependencies for a function explicit."""
 
     def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
@@ -359,11 +359,12 @@ def on(deps: typing.Sequence, defer: bool = False):
 
             def wrapper():
                 nonlocal first
-                args = (dep.value for dep in deps)
                 if first:
                     first = False
-                    return
-                return fn(*args)
+                    func = lambda *_: None  # noqa: E731
+                else:
+                    func = fn
+                return func(*(dep.value for dep in deps))
         else:
 
             def wrapper():
