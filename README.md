@@ -25,17 +25,12 @@ print(c.value) # 3
 b.value = 3
 print(c.value) # 4
 
-# Log the values of a and b whenever one changes
+# Log the values of a, b, c whenever one changes
 @effect
-def print_a_or_b():
-    print(a.value, b.value)
+def log_abc():
+    print(a.value, b.value, c.value)
 
-# Log the value of c whenever it changes
-@effect
-def print_c():
-    print(c.value)
-
-a.value = 2 # prints (2, 3) and 5
+a.value = 2 # prints (2, 3, 5)
 ```
 
 ## cell magic
