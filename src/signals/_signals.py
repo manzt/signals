@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 import weakref
 
-__all__ = ["Signal", "computed", "effect", "batch"]
+__all__ = ["Signal", "computed", "effect", "batch", "on"]
 
 Disposer = typing.Callable[[], None]
 Listener = typing.Callable[[], None]
@@ -348,3 +348,27 @@ def effect(fn: typing.Callable[[], None]) -> Disposer:
         A function for disposing the effect.
     """
     return Effect(lambda: batch(fn))._listen(lambda _: None)
+
+
+def on(deps: typing.Sequence, defer: bool = False):
+    """Make dependencies for a function explicit."""
+
+    def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
+        if defer:
+            first = True
+
+            def wrapper():
+                nonlocal first
+                args = (dep.value for dep in deps)
+                if first:
+                    first = False
+                    return
+                return fn(*args)
+        else:
+
+            def wrapper():
+                return fn(*(dep.value for dep in deps))
+
+        return wrapper
+
+    return decorator

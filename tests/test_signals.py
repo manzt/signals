@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from signals import Signal, computed, effect
+from signals import Signal, computed, effect, on
 
 
 def test_signal_return_value():
@@ -161,3 +161,35 @@ def test_computed_computed():
     b.value += 2
 
     assert d.value == 6
+
+
+def test_explicit_dependencies():
+    a = Signal(42)
+    b = Signal(35)
+
+    spy = MagicMock()
+
+    @effect
+    @on(deps=(a, b))
+    def _(av, bv):
+        spy(av, bv)
+
+    spy.assert_called_with(42, 35)
+    a.value = 1
+    spy.assert_called_with(1, 35)
+
+
+def test_explicit_dependencies_deferred():
+    a = Signal(42)
+    b = Signal(35)
+
+    spy = MagicMock()
+
+    @effect
+    @on(deps=(a, b), defer=True)
+    def _(av, bv):
+        spy(av, bv)
+
+    spy.assert_not_called()
+    a.value = 1
+    spy.assert_not_called()
