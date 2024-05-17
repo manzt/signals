@@ -10,7 +10,7 @@ from IPython.core.magic import (
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
 from IPython.display import display
 
-from ._signals import effect
+from ._core import effect
 
 if typing.TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell

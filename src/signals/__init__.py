@@ -1,6 +1,6 @@
 """A signals implementation for Python."""
 
-from ._signals import Signal, batch, computed, effect
+from ._core import Signal, batch, computed, effect
 from ._version import __version__
 
 
