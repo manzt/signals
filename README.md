@@ -104,3 +104,13 @@ c = Counter(count=shared_count) # creates a signal internally
 # Updates b/c views because they share a signal, and have separate effects
 shared_count.value += 1
 ```
+
+## development
+
+this project uses [`rye`](https://rye-up.com/) for development.
+
+```sh
+rye lint # lints code
+rye fmt  # formats code
+rye test # runs tests
+```
