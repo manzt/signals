@@ -117,12 +117,10 @@ jupyter-server==2.14.0
 jupyter-server-terminals==0.5.3
     # via jupyter-server
 jupyterlab==4.2.0
-    # via jupyterlab-vim
 jupyterlab-pygments==0.3.0
     # via nbconvert
 jupyterlab-server==2.27.1
     # via jupyterlab
-jupyterlab-vim==4.1.3
 jupyterlab-widgets==3.0.10
     # via ipywidgets
 markupsafe==2.1.5
