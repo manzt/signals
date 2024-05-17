@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 import weakref
 
-__all__ = ["Signal", "computed", "effect", "batch", "on"]
+__all__ = ["Signal", "computed", "effect", "batch"]
 
 Disposer = typing.Callable[[], None]
 Listener = typing.Callable[[], None]
@@ -442,10 +442,8 @@ def on(deps: typing.Sequence[Signal], defer: bool = False):
             def void():
                 for dep in deps:
                     dep.value  # noqa: B018
-                # Remove the void function from the list after it has been called
                 fns.pop(0)
 
-            # Insert the void function at the beginning of the list
             fns.insert(0, void)
 
         return lambda: fns[0]()
