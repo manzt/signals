@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,7 +61,7 @@ def test_signal_peek_after_value_change():
 
 def test_signal_peek_not_depend_on_surrounding_effect():
     s = Signal(1)
-    spy = MagicMock(lambda: s.peek())
+    spy = MagicMock(s.peek)
 
     effect(spy)
     assert spy.call_count == 1
@@ -88,7 +90,7 @@ def test_computed_is_readonly():
 
 def test_signal_peek_not_depend_on_surrounding_computed():
     s = Signal(1)
-    spy = MagicMock(lambda: s.peek())
+    spy = MagicMock(s.peek)
     d = computed(spy)
 
     d.value  # noqa: B018
