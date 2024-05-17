@@ -327,7 +327,7 @@ class Effect(Computed[T]):
         return dispose
 
 
-def effect(fn: typing.Callable[[], None]) -> Disposer:
+def _effect(fn: typing.Callable[[], None]) -> Disposer:
     """Create an effect to run arbitrary code in response to signal changes.
 
     An effect tracks which signals are accessed within the given callback
@@ -348,3 +348,112 @@ def effect(fn: typing.Callable[[], None]) -> Disposer:
         A function for disposing the effect.
     """
     return Effect(lambda: batch(fn))._listen(lambda _: None)
+
+
+@typing.overload
+def effect(  # noqa: D418
+    deps: typing.Sequence[Signal],
+    *,
+    defer: bool = False,
+) -> typing.Callable[[typing.Callable[..., None]], Disposer]:
+    """Create an effect with explicit dependencies.
+
+    An effect is a side-effect that runs in response to signal changes.
+
+    Parameters
+    ----------
+    deps : Sequence[Signal]
+        The signals that the effect depends on.
+
+    defer : bool, optional
+        Defer the effect until the next change, rather than running immediately.
+        By default, False.
+
+    Returns
+    -------
+    Callable[[Callable[..., None]], Disposer]
+        A decorator function for creating effects.
+    """
+    ...
+
+
+@typing.overload
+def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
+    """Create an effect to run arbitrary code in response to signal changes.
+
+    An effect tracks which signals are accessed within the given callback
+    function `fn`, and re-runs the callback when those signals change.
+
+    The callback may return a cleanup function. The cleanup function gets
+    run once, either when the callback is next called or when the effect
+    gets disposed, whichever happens first.
+
+    Parameters
+    ----------
+    fn : Callable[[], None]
+        The effect callback.
+
+    Returns
+    -------
+    Callable[[], None]
+        A function for disposing the effect.
+    """
+    ...
+
+
+def effect(*args, **kwargs) -> typing.Callable:
+    """Create an effect to run arbitrary code in response to signal changes."""
+    if len(args) == 1 and callable(args[0]):
+        return _effect(args[0])
+
+    if len(args) == 1:
+        deps = args[0]
+    else:
+        deps = kwargs.get("deps", [])
+    defer = kwargs.get("defer", False)
+
+    def wrap(fn):
+        return _effect(on(deps=deps, defer=defer)(fn))
+
+    return wrap
+
+
+def on(deps: typing.Sequence[Signal], *, defer: bool = False):
+    """Make dependencies for a function explicit.
+
+    Parameters
+    ----------
+    deps : Sequence[Signal]
+        The signals that the effect depends on.
+
+    defer : bool, optional
+        Defer the effect until the next change, rather than running immediately.
+        By default, False.
+
+    Returns
+    -------
+    Callable[[Callable[..., None]], Callable[[], None]]
+        A callback function that can be registered as an effect.
+    """
+
+    def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
+        # The main effect function that will be run.
+        def main():
+            return fn(*(dep.value for dep in deps))
+
+        func = main
+
+        if defer:
+            # Create a void function that accesses all of the
+            # dependencies so they will be tracked in an effect.
+            def void():
+                nonlocal func
+                for dep in deps:
+                    dep.value  # noqa: B018
+                func = main
+
+            func = void
+
+        return lambda: func()
+
+    return decorator
