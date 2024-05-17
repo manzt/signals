@@ -1,5 +1,7 @@
 """A signals implementation for Python."""
 
+from __future__ import annotations
+
 from ._core import Signal, batch, computed, effect
 from ._version import __version__
 
@@ -14,6 +16,6 @@ def load_ipython_extension(ipython):
     ipython : IPython.core.interactiveshell.InteractiveShell
         The IPython shell instance.
     """
-    from ._cellmagic import SignalsMagics
+    from ._cellmagic import SignalsMagics  # noqa: PLC0415
 
     ipython.register_magics(SignalsMagics)

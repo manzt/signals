@@ -5,18 +5,18 @@ from __future__ import annotations
 import typing
 import weakref
 
-__all__ = ["Signal", "computed", "effect", "batch"]
+__all__ = ["Signal", "batch", "computed", "effect"]
 
 Disposer = typing.Callable[[], None]
 Listener = typing.Callable[[], None]
 
 # current computed that is running
-current_computed: Computed | None = None
+CURRENT_COMPUTED: Computed | None = None
 
 # a set of listeners which will be triggered after the batch is complete
-batch_pending: set[Listener] | None = None
+BATCH_PENDING: set[Listener] | None = None
 
-processing_signals: set[Signal] = set()
+PROCESSING_SIGNALS: set[Signal] = set()
 
 T = typing.TypeVar("T")
 
@@ -38,19 +38,18 @@ def batch(fn: typing.Callable[[], T]) -> T:
     T
         The value returned by the callback function.
     """
-    global batch_pending
-    global processing_signals
+    global BATCH_PENDING  # noqa: PLW0603
 
-    if batch_pending is None:
+    if BATCH_PENDING is None:
         listeners = set()
-        old = batch_pending
-        batch_pending = listeners
+        old = BATCH_PENDING
+        BATCH_PENDING = listeners
 
         try:
             return fn()
         finally:
-            batch_pending = old
-            processing_signals.clear()
+            BATCH_PENDING = old
+            PROCESSING_SIGNALS.clear()
 
             # trigger any pending listeners
             for listener in listeners:
@@ -62,7 +61,7 @@ def batch(fn: typing.Callable[[], T]) -> T:
 class Signal(typing.Generic[T]):
     """Represents a signal that can be subscribed to for changes in value."""
 
-    __slots__ = ["_value", "_children", "__weakref__"]
+    __slots__ = ["__weakref__", "_children", "_value"]
 
     _value: T
 
@@ -98,30 +97,23 @@ class Signal(typing.Generic[T]):
     @property
     def value(self) -> T:
         """Get the current value of the signal."""
-        global current_computed
-        global batch_pending
-
         value = self._value
-        if current_computed is not None:
+        if CURRENT_COMPUTED is not None:
             # this is ued to detect infinite cycles
-            if batch_pending is not None:
-                processing_signals.add(self)
+            if BATCH_PENDING is not None:
+                PROCESSING_SIGNALS.add(self)
 
             # if accessing inside of a computed, add this to the computed's parents
-            current_computed._add_dependency(self, value)
+            CURRENT_COMPUTED._add_dependency(self, value)
 
         return value
 
     @value.setter
     def value(self, value: T) -> None:
-        global current_computed
-        global batch_pending
-        global processing_signals
-
         if (
-            current_computed is not None
-            and batch_pending is not None
-            and self in processing_signals
+            CURRENT_COMPUTED is not None
+            and BATCH_PENDING is not None
+            and self in PROCESSING_SIGNALS
         ):
             raise RuntimeError("Cycle detected")
 
@@ -129,7 +121,7 @@ class Signal(typing.Generic[T]):
 
         # If the value is set outside of a batch, this ensures that all of the
         # children will be fully marked as dirty before triggering any listeners
-        batch(lambda: self._wakeup())
+        batch(self._wakeup)
 
     def subscribe(
         self, fn: typing.Callable[[T], typing.Any]
@@ -152,7 +144,7 @@ class Signal(typing.Generic[T]):
 class Computed(Signal[T]):
     """Represents a signal whose value is derived from other signals."""
 
-    __slots__ = ["_first", "_dirty", "_has_error", "_weak", "_parents", "_callback"]
+    __slots__ = ["_callback", "_dirty", "_first", "_has_error", "_parents", "_weak"]
 
     # Whether this is the first time processing the computed
     _first: bool
@@ -200,7 +192,7 @@ class Computed(Signal[T]):
             parent._children.remove(self._weak)
 
     def peek(self) -> T:
-        global current_computed
+        global CURRENT_COMPUTED  # noqa: PLW0603
 
         if self._dirty:
             try:
@@ -223,13 +215,13 @@ class Computed(Signal[T]):
                     # The links will be recreated by the _addDependency method.
                     self._remove_dependencies()
 
-                    old = current_computed
-                    current_computed = self
+                    old = CURRENT_COMPUTED
+                    CURRENT_COMPUTED = self
 
                     try:
                         self._value = self._callback()
                     finally:
-                        current_computed = old
+                        CURRENT_COMPUTED = old
             except Exception as e:
                 self._has_error = True
                 # We reuse the _value slot for the error, instead of using
@@ -238,24 +230,23 @@ class Computed(Signal[T]):
 
         if self._has_error:
             # We know that the value is an exception
-            raise self._value  # type: ignore
+            raise self._value
 
         return self._value
 
     @property
     def value(self) -> T:
         """Get the current value of the computed."""
-        global current_computed
         value = self.peek()
 
-        if current_computed is not None:
+        if CURRENT_COMPUTED is not None:
             # If accessing inside of a computed, add this to the computed's parents
-            current_computed._add_dependency(self, value)
+            CURRENT_COMPUTED._add_dependency(self, value)
 
         return value
 
     @value.setter
-    def value(self, value: T) -> None:
+    def value(self, value: T) -> None:  # noqa: PLR6301
         raise AttributeError("Computed singals are read-only")
 
     def __repr__(self) -> str:
@@ -297,13 +288,11 @@ class Effect(Computed[T]):
 
     def _wakeup(self):
         """Mark this effect as dirty whenever any of its parents change."""
-        global batch_pending
-
-        if batch_pending is None:
+        if BATCH_PENDING is None:
             raise RuntimeError("invalid batch_pending")
 
         if self._listener is not None:
-            batch_pending.add(self._listener)
+            BATCH_PENDING.add(self._listener)
 
         super()._wakeup()
 
@@ -374,7 +363,6 @@ def effect(  # noqa: D418
     Callable[[Callable[..., None]], Disposer]
         A decorator function for creating effects.
     """
-    ...
 
 
 @typing.overload
@@ -398,7 +386,6 @@ def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
     Callable[[], None]
         A function for disposing the effect.
     """
-    ...
 
 
 def effect(*args, **kwargs) -> typing.Callable:
@@ -406,10 +393,7 @@ def effect(*args, **kwargs) -> typing.Callable:
     if len(args) == 1 and callable(args[0]):
         return _effect(args[0])
 
-    if len(args) == 1:
-        deps = args[0]
-    else:
-        deps = kwargs.get("deps", [])
+    deps = args[0] if len(args) == 1 else kwargs.get("deps", [])
     defer = kwargs.get("defer", False)
 
     def wrap(fn):
@@ -454,6 +438,6 @@ def on(deps: typing.Sequence[Signal], *, defer: bool = False):
 
             func = void
 
-        return lambda: func()
+        return lambda: func()  # noqa: PLW0108
 
     return decorator
