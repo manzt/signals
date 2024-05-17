@@ -16,6 +16,6 @@ def load_ipython_extension(ipython):
     ipython : IPython.core.interactiveshell.InteractiveShell
         The IPython shell instance.
     """
-    from ._cellmagic import SignalsMagics  # noqa: PLC0415
+    from ._cellmagic import load_ipython_extension  # noqa: PLC0415
 
-    ipython.register_magics(SignalsMagics)
+    load_ipython_extension(ipython)
