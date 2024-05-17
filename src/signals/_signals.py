@@ -352,8 +352,8 @@ def _effect(fn: typing.Callable[[], None]) -> Disposer:
 
 @typing.overload
 def effect(  # noqa: D418
-    *,
     deps: typing.Sequence[Signal],
+    *,
     defer: bool = False,
 ) -> typing.Callable[[typing.Callable[..., None]], Disposer]:
     """Create an effect with explicit dependencies.
@@ -403,19 +403,22 @@ def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
 
 def effect(*args, **kwargs) -> typing.Callable:
     """Create an effect to run arbitrary code in response to signal changes."""
-    if len(args) == 1 and not kwargs:
+    if len(args) == 1 and callable(args[0]):
         return _effect(args[0])
 
-    deps = kwargs.get("deps", ())
+    if len(args) == 1:
+        deps = args[0]
+    else:
+        deps = kwargs.get("deps", [])
     defer = kwargs.get("defer", False)
 
     def wrap(fn):
-        return _effect(on(deps, defer)(fn))
+        return _effect(on(deps=deps, defer=defer)(fn))
 
     return wrap
 
 
-def on(deps: typing.Sequence[Signal], defer: bool = False):
+def on(deps: typing.Sequence[Signal], *, defer: bool = False):
     """Make dependencies for a function explicit.
 
     Parameters
