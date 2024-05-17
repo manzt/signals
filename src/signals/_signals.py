@@ -434,24 +434,23 @@ def on(deps: typing.Sequence[Signal], defer: bool = False):
     """
 
     def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
-        stack = []
-
         # The main effect function that will be run.
         def main():
             return fn(*(dep.value for dep in deps))
 
-        stack.append(main)
+        func = main
 
         if defer:
             # Create a void function that accesses all of the
             # dependencies so they will be tracked in an effect.
             def void():
+                nonlocal func
                 for dep in deps:
                     dep.value  # noqa: B018
-                stack.pop()
+                func = main
 
-            stack.append(void)
+            func = void
 
-        return lambda: stack[-1]()
+        return lambda: func()
 
     return decorator
