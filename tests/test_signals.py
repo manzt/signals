@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from signals import Signal, computed, effect, on
+from signals import Signal, computed, effect
 
 
 def test_signal_return_value():
@@ -169,8 +169,7 @@ def test_explicit_dependencies():
 
     spy = MagicMock()
 
-    @effect
-    @on(deps=(a, b))
+    @effect(deps=(a, b))
     def _(av, _):
         # We want to make sure the effect works even if bv is never accessed
         spy(av if True else _)
@@ -189,8 +188,7 @@ def test_explicit_dependencies_deferred():
 
     spy = MagicMock()
 
-    @effect
-    @on(deps=(a, b), defer=True)
+    @effect(deps=(a, b), defer=True)
     def _(av, bv):
         spy(av, bv)
 
