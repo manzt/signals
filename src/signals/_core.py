@@ -82,13 +82,17 @@ class Signal(typing.Generic[T]):
     # Recurse down all children, marking them as diry and adding
     # listeners to batch_pending
     def _wakeup(self):
+        to_remove = set()
         for child_ref in self._children:
             child = child_ref()
             if child is not None:
                 child._wakeup()
             else:
-                # If the child has been garbage collected, remove it from the set
-                self._children.remove(child_ref)
+                to_remove.add(child_ref)
+
+        for child_ref in to_remove:
+            # If the child has been garbage collected, remove it from the set
+            self._children.remove(child_ref)
 
     def peek(self):
         """Get the current value of the signal without subscribing to changes."""
