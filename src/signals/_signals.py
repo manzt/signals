@@ -433,23 +433,21 @@ def on(deps: typing.Sequence[Signal], defer: bool = False):
         A callback function that can be registered as an effect.
     """
 
-    def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
+    def deco(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
+        fns = [lambda: fn(*(dep.value for dep in deps))]
+
         if defer:
-            first = True
+            # Create a void function that accesses all of the
+            # dependencies so they will be tracked in an effect.
+            def void():
+                for dep in deps:
+                    dep.value  # noqa: B018
+                # Remove the void function from the list after it has been called
+                fns.pop(0)
 
-            def wrapper():
-                nonlocal first
-                if first:
-                    first = False
-                    func = lambda *_: None  # noqa: E731
-                else:
-                    func = fn
-                return func(*(dep.value for dep in deps))
-        else:
+            # Insert the void function at the beginning of the list
+            fns.insert(0, void)
 
-            def wrapper():
-                return fn(*(dep.value for dep in deps))
+        return lambda: fns[0]()
 
-        return wrapper
-
-    return decorator
+    return deco
