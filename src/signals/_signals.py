@@ -433,8 +433,14 @@ def on(deps: typing.Sequence[Signal], defer: bool = False):
         A callback function that can be registered as an effect.
     """
 
-    def deco(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
-        fns = [lambda: fn(*(dep.value for dep in deps))]
+    def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
+        stack = []
+
+        # The main effect function that will be run.
+        def main():
+            return fn(*(dep.value for dep in deps))
+
+        stack.append(main)
 
         if defer:
             # Create a void function that accesses all of the
@@ -442,10 +448,10 @@ def on(deps: typing.Sequence[Signal], defer: bool = False):
             def void():
                 for dep in deps:
                     dep.value  # noqa: B018
-                fns.pop(0)
+                stack.pop()
 
-            fns.insert(0, void)
+            stack.append(void)
 
-        return lambda: fns[0]()
+        return lambda: stack[-1]()
 
-    return deco
+    return decorator
