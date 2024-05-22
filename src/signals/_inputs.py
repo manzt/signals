@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 import typing
 import weakref
 
@@ -47,87 +48,36 @@ def signal_comm(
     return comm
 
 
-esm = """
-import * as Inputs from "https://esm.sh/@observablehq/inputs";
-import { createSignal, createEffect } from "https://esm.sh/solid-js";
-
-function eventof(input) {
-  switch (input.type) {
-    case "button":
-    case "submit": return "click";
-    case "file": return "change";
-    default: return "input";
-  }
-}
-
-function create_signal(model, name) {
-  let [value, set_value] = createSignal(model.get(name));
-  model.on(`change:${name}`, () => {
-    set_value(model.get(name));
-  });
-  return [
-      value,
-      (update) => {
-        if (typeof update === "function") {
-          update = update(model.get(name));
-        }
-        model.set(name, update);
-        model.save_changes();
-      }
-  ];
-}
-
-function resolve_options(kind, options) {
-  switch (kind) {
-    case "range":
-      return {
-        ...options,
-        transform: { "log": Math.log, "sqrt": Math.sqrt }[options.transform]
-    }
-    default:
-        return options;
-  }
-}
-export default () => {
-  let value;
-  let set_value;
-  return {
-      async initialize({ model }) {
-          let model_id = model.get("signal").slice("signal:".length);
-          [value, set_value] = create_signal(
-              await model.widget_manager.get_model(model_id),
-              "value",
-          );
-      },
-      async render({ model, el }) {
-        let kind = model.get("kind");
-        let contents = model.get("content");
-        let options = resolve_options(kind, model.get("options"));
-        let input = contents ? Inputs[kind](contents, options) : Inputs[kind](options);
-        createEffect(() => {
-          input.value = value()
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        })
-        input.addEventListener(eventof(input), (event) => {
-            set_value(input.value);
-        });
-        el.appendChild(input);
-      }
-  }
-}
-"""
-
-
 T = typing.TypeVar("T")
 
 
 class Input(typing.Generic[T]):
-    """A base class for inputs."""
+    """A base class for inputs.
 
-    _repr_mimebundle_ = MimeBundleDescriptor(_esm=esm, autodetect_observer=False)
+    Attributes
+    ----------
+    value: T | Signal[T]
+        The current value of the input.
+    label: str
+        A label for the input.
+    disabled: bool | Signal[bool]
+        Whether the input is disabled.
+    """
 
-    def __init__(self, value: T | Signal[T]):
+    _repr_mimebundle_ = MimeBundleDescriptor(
+        _esm=pathlib.Path(__file__).parent / "widget.js", autodetect_observer=False
+    )
+
+    def __init__(
+        self,
+        value: T | Signal[T],
+        *,
+        label: str | None,
+        disabled: bool | Signal[bool],
+    ):
         self._value = value if isinstance(value, Signal) else Signal(value)
+        self._disabled = disabled if isinstance(disabled, Signal) else Signal(disabled)
+        self.label = label
 
     @property
     def value(self):
@@ -137,9 +87,22 @@ class Input(typing.Generic[T]):
     def value(self, update):
         self._value.value = update
 
+    @property
+    def disabled(self):
+        return self._disabled.value
+
+    @disabled.setter
+    def disabled(self, update):
+        self._disabled.value = update
+
     def _get_anywidget_state(self, include) -> dict[str, typing.Any]:
         return {
             "signal": f"signal:{signal_comm(self._value).comm_id}",
+            "options": {
+                "label": self.label,
+                "value": self.value,
+                "disabled": self.disabled,
+            },
         }
 
 
@@ -160,11 +123,11 @@ class Toggle(Input):
         self,
         *,
         value: bool | Signal[bool] = False,
-        label: str = "",
         values: tuple[typing.Any, typing.Any] = (True, False),
+        label: str | None = None,
+        disabled: bool | Signal[bool] = False,
     ):
-        super().__init__(value)
-        self.label = label
+        super().__init__(value, label=label, disabled=disabled)
         self._values = values
 
     @property
@@ -181,7 +144,6 @@ class Toggle(Input):
     def _get_anywidget_state(self, include):
         state = super()._get_anywidget_state(include)
         state["kind"] = "toggle"
-        state["options"] = {"label": self.label, "value": self.value}
         return state
 
 
@@ -196,14 +158,16 @@ class Range(Input):
         The current value of the input (default: min +  max / 2).
     step: float
         The interval between adjacent values.
-    label: str
-        A label for the input.
     placeholder: str
         A placeholder string for when the input is empty.
     transform: Literal["linear", "log", "sqrt"]
         The transform method (default: "linear").
     width: int
         The width of the input (not including label).
+    label: str
+        A label for the input.
+    disabled: bool | Signal[bool]
+        Whether the input is disabled.
     """
 
     def __init__(  # noqa: PLR0913
@@ -212,14 +176,18 @@ class Range(Input):
         *,
         value: float | Signal[float] | None = None,
         step: float | None = None,
-        label: str | None = None,
         placeholder: str | None = None,
         transform: typing.Literal["linear", "log", "sqrt"] | None = None,
         width: int | None = None,
+        label: str | None = None,
+        disabled: bool | Signal[bool] = False,
     ):
-        super().__init__(value if value is not None else extent[0] + extent[1] / 2)
+        super().__init__(
+            value if value is not None else extent[0] + extent[1] / 2,
+            label=label,
+            disabled=disabled,
+        )
         self.extent = extent
-        self.label = label
         self.step = step
         self.format = format
         self.placeholder = placeholder
@@ -230,15 +198,87 @@ class Range(Input):
         state = super()._get_anywidget_state(include)
         state["kind"] = "range"
         state["content"] = self.extent
-        state["options"] = {
-            "label": self.label,
-            "step": self.step,
-            "value": self.value,
-            "placeholder": self.placeholder,
-            "transform": self.transform,
-            "width": self.width,
-        }
+        state["options"].update(
+            {
+                "step": self.step,
+                "placeholder": self.placeholder,
+                "transform": self.transform,
+                "width": self.width,
+            }
+        )
         for key in list(state["options"]):
             if state["options"][key] is None:
                 del state["options"][key]
         return state
+
+
+class Radio(Input[T]):
+    """A radio input.
+
+    options: list
+        The options to choose from.
+    value: T | Signal[T]
+        The current value of the input.
+    label: str
+        A label for the input.
+    format: Callable[[T], str]
+        A function to format the value.
+    disabled: bool | Signal[bool]
+        Whether the input is disabled.
+    """
+
+    def __init__(  # noqa: PLR0913
+        self,
+        options: list[T] | dict[str, T],
+        *,
+        value: T | Signal[T] = None,
+        label: str | None = None,
+        format: typing.Callable[[T], str] | None = None,
+        disabled: bool | Signal[bool] = False,
+    ):
+        if isinstance(options, dict):
+            keys = list(options.keys())
+            options = list(options.values())
+            format = lambda x: keys[options.index(x)]  # noqa: A001, E731
+        super().__init__(
+            value if value is not None else options[0], label=label, disabled=disabled
+        )
+        self.options = options
+        self.format = format
+        self.label = label
+
+    def _get_anywidget_state(self, include):
+        state = super()._get_anywidget_state(include)
+        state["kind"] = "radio"
+        state["content"] = self.options
+        state["options"]["format"] = (
+            list(map(self.format, self.options)) if self.format else None
+        )
+        for key in list(state["options"]):
+            if state["options"][key] is None:
+                del state["options"][key]
+        return state
+
+
+class Select(Radio):
+    """A select input.
+
+    options: list
+        The options to choose from.
+    value: T | Signal[T]
+        The current value of the input.
+    label: str
+        A label for the input.
+    format: Callable[[T], str]
+        A function to format the value.
+    disabled: bool | Signal[bool]
+        Whether the input is disabled.
+    """
+
+    def _get_anywidget_state(self, include):
+        state = super()._get_anywidget_state(include)
+        state["kind"] = "select"
+        return state
+
+
+class Form(Input): ...
