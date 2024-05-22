@@ -281,4 +281,17 @@ class Select(Radio):
         return state
 
 
-class Form(Input): ...
+class Form:
+    _repr_mimebundle_ = MimeBundleDescriptor(
+        _esm=pathlib.Path(__file__).parent / "widget.js",
+        autodetect_observer=False,
+    )
+
+    def __init__(self, *inputs):
+        self.inputs = inputs
+
+    def _get_anywidget_state(self, include):
+        return {
+            "kind": "form",
+            "inputs": [i._get_anywidget_state(include) for i in self.inputs],
+        }

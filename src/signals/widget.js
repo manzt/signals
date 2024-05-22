@@ -1,6 +1,6 @@
 // @ts-check
 import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
-import { createEffect, createSignal } from "https://esm.sh/solid-js@1.8.17";
+import * as Signals from "https://esm.sh/@preact/signals-core@1.6.0";
 
 /**
  * @param {HTMLFormElement} input
@@ -23,20 +23,22 @@ function eventof(input) {
  * @param {string} name
  */
 function create_signal(model, name) {
-	const [value, set_value] = createSignal(/** @type {T} */ (model.get(name)));
+	const value = Signals.signal(/** @type {T} */ (model.get(name)));
 	model.on(`change:${name}`, () => {
-		set_value(model.get(name));
+		value.value = model.get(name);
 	});
-	return [
-		value,
-		(/** @type {T} */ update) => {
+	return {
+		get value() {
+			return value.value;
+		},
+		set value(/** @type {T} */ update) {
 			if (typeof update === "function") {
 				update = update(model.get(name));
 			}
 			model.set(name, update);
 			model.save_changes();
 		},
-	];
+	};
 }
 
 /**
@@ -65,6 +67,22 @@ function resolve_options(kind, options) {
 }
 
 /** @typedef {"range" | "radio" | "select" | "checkbox" | "toggle"} InputKind */
+/** @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, signal: Signals.Signal }} InputData */
+
+/**
+ * @param {import("npm:@anywidget/types").AnyModel} model
+ * @param {{ kind: string, content?: any, options: Record<string, any>, signal: string }} param1
+ */
+async function create_input_data(model, { kind, content, options, signal }) {
+	const model_id = signal.slice("signal:".length);
+	const signal_model = await model.widget_manager.get_model(model_id);
+	return {
+		kind,
+		content,
+		options: resolve_options(kind, options),
+		signal: create_signal(signal_model, "value"),
+	};
+}
 
 /**
  * @param {InputKind} kind
@@ -72,39 +90,61 @@ function resolve_options(kind, options) {
  * @param {Record<string, any>} options
  * @returns {HTMLFormElement}
  */
-function resolve_input(kind, contents, options) {
+function create_input(kind, contents, options) {
 	options = resolve_options(kind, options);
 	console.log(kind, contents, options);
 	return contents ? Inputs[kind](contents, options) : Inputs[kind](options);
 }
 
+/**
+ * @template T
+ * @param {HTMLFormElement} input
+ * @param {Signals.Signal<T>} signal
+ */
+function connect_input(input, signal) {
+	const dispose = Signals.effect(() => {
+		input.value = signal.value;
+		input.dispatchEvent(new Event(eventof(input), { bubbles: true }));
+	});
+	const on_change = () => {
+		signal.value = input.value;
+	};
+	input.addEventListener(eventof(input), on_change);
+	return () => {
+		dispose();
+		input.removeEventListener(eventof(input), on_change);
+	};
+}
+
 export default () => {
-	/** @type{import("npm:solid-js").Accessor<any>} */
-	let value;
-	/** @type{import("npm:solid-js").Setter<any>} */
-	let set_value;
+	/** @type {Array<InputData>} */
+	let data;
 	return {
 		/** @type {import("npm:@anywidget/types").Initialize} */
 		async initialize({ model }) {
-			const model_id = model.get("signal").slice("signal:".length);
-			const signal_model = await model.widget_manager.get_model(model_id);
-			[value, set_value] = create_signal(signal_model, "value");
+			/** @type {Array<Omit<InputData, "signal"> & { signal: string }>} */
+			const entries = model.get("kind") === "form" ? model.get("inputs") : [{
+				kind: model.get("kind"),
+				content: model.get("content"),
+				options: model.get("options"),
+				signal: model.get("signal"),
+			}];
+			data = await Promise.all(
+				entries.map((entry) => create_input_data(model, entry)),
+			);
 		},
 		/** @type {import("npm:@anywidget/types").Render} */
-		render({ model, el }) {
-			const input = resolve_input(
-				model.get("kind"),
-				model.get("content"),
-				model.get("options"),
-			);
-			createEffect(() => {
-				input.value = value();
-				input.dispatchEvent(new Event(eventof(input), { bubbles: true }));
+		render({ el }) {
+			const inputs = data.map((input) => {
+				const el = create_input(input.kind, input.content, input.options);
+				const dispose = connect_input(el, input.signal);
+				return { el, dispose };
 			});
-			input.addEventListener(eventof(input), () => {
-				set_value(input.value);
-			});
-			el.appendChild(input);
+			const form = Inputs.form(inputs.map((d) => d.el));
+			el.appendChild(form);
+			return () => {
+				inputs.forEach((d) => d.dispose());
+			};
 		},
 	};
 };
