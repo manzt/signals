@@ -1,5 +1,6 @@
-// @ts-check
+// @deno-types="npm:@observablehq/inputs@0.10.6";
 import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
+// @deno-types="npm:@preact/signals-core@1.6.0"
 import * as Signals from "https://esm.sh/@preact/signals-core@1.6.0";
 
 /**
@@ -46,6 +47,7 @@ function create_signal(model, name) {
  * @param {Record<string, any>} options
  */
 function resolve_options(kind, options) {
+	console.log({ kind, format: options.format });
 	switch (kind) {
 		case "range":
 			return {
@@ -58,13 +60,26 @@ function resolve_options(kind, options) {
 			return {
 				...options,
 				format: options.format
-					? (/** @type{unknown}*/ _, /** @type{number} */ i) =>
-						options.format[i]
+					? (/** @type {unknown} */ _, /** @type {number} */ i) => {
+						return options.format[i];
+					}
 					: undefined,
 			};
 		default:
 			return options;
 	}
+}
+
+/**
+ * Remove all nullish values from an object.
+ *
+ * @param {Record<string, any>} obj
+ * @returns {Record<string, any>}
+ */
+function omit_nullish(obj) {
+	return Object.fromEntries(
+		Object.entries(obj).filter(([, v]) => v != undefined),
+	);
 }
 
 /**
@@ -89,7 +104,7 @@ async function create_input_data(model, input_data) {
 	return {
 		kind,
 		content,
-		options: resolve_options(kind, options),
+		options: omit_nullish(resolve_options(kind, options)),
 		signal: create_signal(signal_model, "value"),
 	};
 }
@@ -101,7 +116,6 @@ async function create_input_data(model, input_data) {
  * @returns {HTMLFormElement}
  */
 function create_input(kind, contents, options) {
-	options = resolve_options(kind, options);
 	return contents ? Inputs[kind](contents, options) : Inputs[kind](options);
 }
 

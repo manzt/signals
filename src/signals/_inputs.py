@@ -206,9 +206,6 @@ class Range(Input):
                 "width": self.width,
             }
         )
-        for key in list(state["options"]):
-            if state["options"][key] is None:
-                del state["options"][key]
         return state
 
 
@@ -251,12 +248,9 @@ class Radio(Input[T]):
         state = super()._get_anywidget_state(include)
         state["kind"] = "radio"
         state["content"] = self.options
-        state["options"]["format"] = (
-            list(map(self.format, self.options)) if self.format else None
+        state["options"].update(
+            {"format": list(map(self.format, self.options)) if self.format else None}
         )
-        for key in list(state["options"]):
-            if state["options"][key] is None:
-                del state["options"][key]
         return state
 
 
