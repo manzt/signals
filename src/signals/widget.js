@@ -28,10 +28,10 @@ function create_signal(model, name) {
 		value.value = model.get(name);
 	});
 	return {
-		get value() {
+		get() {
 			return value.value;
 		},
-		set value(/** @type {T} */ update) {
+		set(/** @type {T} */ update) {
 			if (typeof update === "function") {
 				update = update(model.get(name));
 			}
@@ -42,7 +42,7 @@ function create_signal(model, name) {
 }
 
 /**
- * @param {string} kind
+ * @param {InputKind} kind
  * @param {Record<string, any>} options
  */
 function resolve_options(kind, options) {
@@ -53,6 +53,7 @@ function resolve_options(kind, options) {
 				// @ts-expect-error - we want to fallback to `undefined` if `options.transform` is not a valid key
 				transform: { log: Math.log, sqrt: Math.sqrt }[options.transform],
 			};
+		case "select":
 		case "radio":
 			return {
 				...options,
@@ -66,14 +67,23 @@ function resolve_options(kind, options) {
 	}
 }
 
+/**
+ * @template T
+ * @typedef {{ get(): T, set(value: T): void }} WebSignal
+ */
 /** @typedef {"range" | "radio" | "select" | "checkbox" | "toggle"} InputKind */
-/** @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, signal: Signals.Signal }} InputData */
+/**
+ * @template SignalT
+ * @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, signal: SignalT }} InputData
+ */
 
 /**
  * @param {import("npm:@anywidget/types").AnyModel} model
- * @param {{ kind: string, content?: any, options: Record<string, any>, signal: string }} param1
+ * @param {InputData<string>} input_data
+ * @returns {Promise<InputData<WebSignal<unknown>>>}
  */
-async function create_input_data(model, { kind, content, options, signal }) {
+async function create_input_data(model, input_data) {
+	const { kind, content, options, signal } = input_data;
 	const model_id = signal.slice("signal:".length);
 	const signal_model = await model.widget_manager.get_model(model_id);
 	return {
@@ -92,22 +102,21 @@ async function create_input_data(model, { kind, content, options, signal }) {
  */
 function create_input(kind, contents, options) {
 	options = resolve_options(kind, options);
-	console.log(kind, contents, options);
 	return contents ? Inputs[kind](contents, options) : Inputs[kind](options);
 }
 
 /**
  * @template T
  * @param {HTMLFormElement} input
- * @param {Signals.Signal<T>} signal
+ * @param {{ get(): T, set(value: T): void }} signal
  */
 function connect_input(input, signal) {
 	const dispose = Signals.effect(() => {
-		input.value = signal.value;
+		input.value = signal.get();
 		input.dispatchEvent(new Event(eventof(input), { bubbles: true }));
 	});
 	const on_change = () => {
-		signal.value = input.value;
+		signal.set(input.value);
 	};
 	input.addEventListener(eventof(input), on_change);
 	return () => {
@@ -117,12 +126,12 @@ function connect_input(input, signal) {
 }
 
 export default () => {
-	/** @type {Array<InputData>} */
+	/** @type {Array<InputData<WebSignal<unknown>>>} */
 	let data;
 	return {
 		/** @type {import("npm:@anywidget/types").Initialize} */
 		async initialize({ model }) {
-			/** @type {Array<Omit<InputData, "signal"> & { signal: string }>} */
+			/** @type {Array<InputData<string>>} */
 			const entries = model.get("kind") === "form" ? model.get("inputs") : [{
 				kind: model.get("kind"),
 				content: model.get("content"),
