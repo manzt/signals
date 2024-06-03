@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import typing
 
-import ipywidgets
 from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
-from IPython.display import display
+from IPython.display import clear_output, display
 
 from ._core import effect
 
@@ -34,18 +33,21 @@ class SignalsMagics(Magics):
 
         # Cleanup previous effect
         if name in EFFECTS:
-            cleanup, output_widget = EFFECTS.pop(name)
+            cleanup = EFFECTS.pop(name)
             cleanup()
-            output_widget.close()
 
-        output_widget = ipywidgets.Output()
+        display_handle = display(None, display_id=name)
+        assert display_handle, "Failed to create display handle."
+        shell = typing.cast("InteractiveShell", self.shell)
 
-        @output_widget.capture(clear_output=True, wait=True)
+        shell.run_cell(cell, cell_id=name)
+        clear_output()
+
         def run_cell():
-            typing.cast("InteractiveShell", self.shell).run_cell(cell)
+            result = shell.run_cell(cell)
+            display_handle.update(result.result)
 
-        EFFECTS[name] = (effect(run_cell), output_widget)
-        display(output_widget)
+        EFFECTS[name] = effect(run_cell)
 
     @cell_magic
     def clear_effects(self, line, cell):  # noqa: PLR6301
