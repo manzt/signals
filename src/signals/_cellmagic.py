@@ -10,7 +10,6 @@ from IPython.display import display
 from ._core import effect
 
 if typing.TYPE_CHECKING:
-    from IPython.core.display import DisplayHandle
     from IPython.core.interactiveshell import InteractiveShell
 
 EFFECTS = {}
@@ -57,9 +56,9 @@ def run_ast_nodes(
     return {"value": value}
 
 
-def prepare_cell_execution(
-    shell: InteractiveShell, raw_code: str, display_handle: DisplayHandle
-):
+def prepare_cell_execution(shell: InteractiveShell, raw_code: str):
+    display_handle = display(None, display_id=True)
+    assert display_handle, "Failed to create display handle."
     transformed_code = shell.transform_cell(raw_code)
     cell_name = shell.compile.cache(
         transformed_code=transformed_code,
@@ -81,7 +80,31 @@ def prepare_cell_execution(
         except Exception:
             shell.showtraceback()
 
-    return run_cell
+    return effect(run_cell)
+
+
+def prepare_cell_execution_ipywidgets(shell: InteractiveShell, raw_code: str):
+    try:
+        import ipywidgets  # noqa: PLC0415
+    except ImportError:
+        raise ImportError("ipywidgets is required for this feature.")  # noqa: B904
+
+    import ipywidgets  # noqa: PLC0415
+
+    output_widget = ipywidgets.Output()
+    display(output_widget)
+
+    @output_widget.capture(clear_output=True, wait=True)
+    def run_cell():
+        shell.run_cell(raw_code)
+
+    cell_effect = effect(run_cell)
+
+    def cleanup():
+        cell_effect()
+        output_widget.close()
+
+    return cleanup
 
 
 @magics_class
@@ -94,6 +117,12 @@ class SignalsMagics(Magics):
         default=None,
         help="Name the effect. Effects are cleaned up by name. default is the cell id.",
     )
+    @argument(
+        "--mode",
+        type=str,
+        default="widget",
+        help="The output mode for the effect. Either 'widget' or 'displayhook'.",
+    )
     @cell_magic
     def effect(self, line, cell):
         """Excute code cell as an effect."""
@@ -105,18 +134,22 @@ class SignalsMagics(Magics):
             cleanup = EFFECTS.pop(name)
             cleanup()
 
-        display_handle = display(None, display_id=True)
-        assert display_handle, "Failed to create display handle."
         shell = typing.cast("InteractiveShell", self.shell)
-        run_cell = prepare_cell_execution(shell, cell, display_handle)
-        EFFECTS[name] = effect(run_cell)
+
+        if args.mode == "widget":
+            cleanup = prepare_cell_execution_ipywidgets(shell, cell)
+        elif args.mode == "displayhook":
+            cleanup = prepare_cell_execution(shell, cell)
+        else:
+            raise ValueError(f"Invalid mode: {args.mode}")
+
+        EFFECTS[name] = cleanup
 
     @cell_magic
     def clear_effects(self, line, cell):  # noqa: PLR6301
         """Clear all effects."""
-        for cleanup, output_widget in EFFECTS.values():
+        for cleanup in EFFECTS.values():
             cleanup()
-            output_widget.close()
         EFFECTS.clear()
 
 
