@@ -16,37 +16,27 @@ EFFECTS = {}
 CELL_ID = None
 
 
-def run_ast_nodes(nodelist: list, cell_name: str, user_global_ns: dict, user_ns: dict):
-    if not nodelist:
-        return False, "No nodes to execute"
+def run_ast_nodes(
+    nodelist: list,
+    cell_name: str,
+    user_global_ns: dict,
+    user_ns: dict,
+):
+    # If the last node is not an expression, run everything
+    if not isinstance(nodelist[-1], ast.Expr):
+        code = compile(ast.Module(nodelist, []), cell_name, "exec")
+        exec(code)
+        return None
 
-    try:
-        # Extract the last node
-        last_node = nodelist[-1]
+    to_run_exec = nodelist[:-1]
+    last_expr = nodelist[-1]
 
-        # If the last node is not an expression, run everything
-        if not isinstance(last_node, ast.Expr):
-            code = compile(ast.Module(nodelist, []), cell_name, "exec")
-            exec(code, user_global_ns, user_ns)
-            return True, None
+    if to_run_exec:
+        exec_code = compile(ast.Module(to_run_exec, []), cell_name, "exec")
+        exec(exec_code, user_global_ns, user_ns)
 
-        # Separate the last expression
-        to_run_exec = nodelist[:-1]
-        last_expr = last_node
-
-        # Compile and execute all nodes except the last expression
-        if to_run_exec:
-            exec_code = compile(ast.Module(to_run_exec, []), cell_name, "exec")
-            exec(exec_code, user_global_ns, user_ns)
-
-        # Compile and evaluate the last expression
-        expr_code = compile(ast.Expression(last_expr.value), cell_name, "eval")
-        result = eval(expr_code, user_global_ns, user_ns)
-
-        return True, result
-
-    except Exception as e:
-        return False, str(e)
+    expr_code = compile(ast.Expression(last_expr.value), cell_name, "eval")
+    return eval(expr_code, user_global_ns, user_ns)
 
 
 @magics_class
@@ -74,22 +64,25 @@ class SignalsMagics(Magics):
         assert display_handle, "Failed to create display handle."
         shell = typing.cast("InteractiveShell", self.shell)
 
-        transformed_cell = shell.transform_cell(cell)
+        transformed_code = shell.transform_cell(cell)
         cell_name = shell.compile.cache(
-            transformed_cell,
-            number=getattr(self, "excution_count", 0),
+            transformed_code=transformed_code,
+            number=shell.execution_count,
             raw_code=cell,
         )
-        code_ast = shell.compile.ast_parse(transformed_cell, filename=cell_name)
+        code_ast = shell.compile.ast_parse(transformed_code, filename=cell_name)
 
         def run_cell():
-            _, value = run_ast_nodes(
-                nodelist=code_ast.body,
-                cell_name=cell_name,
-                user_global_ns=shell.user_global_ns,
-                user_ns=shell.user_ns,
-            )
-            display_handle.update(value)
+            try:
+                result = run_ast_nodes(
+                    nodelist=code_ast.body,
+                    cell_name=cell_name,
+                    user_global_ns=shell.user_global_ns,
+                    user_ns=shell.user_ns,
+                )
+                display_handle.update(result)
+            except Exception:
+                shell.showtraceback()
 
         EFFECTS[name] = effect(run_cell)
 
