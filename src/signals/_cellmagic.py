@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import ast
 import typing
 
 from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
-from IPython.display import clear_output, display
+from IPython.display import display
 
 from ._core import effect
 
@@ -13,6 +14,39 @@ if typing.TYPE_CHECKING:
 
 EFFECTS = {}
 CELL_ID = None
+
+
+def run_ast_nodes(nodelist: list, cell_name: str, user_global_ns: dict, user_ns: dict):
+    if not nodelist:
+        return False, "No nodes to execute"
+
+    try:
+        # Extract the last node
+        last_node = nodelist[-1]
+
+        # If the last node is not an expression, run everything
+        if not isinstance(last_node, ast.Expr):
+            code = compile(ast.Module(nodelist, []), cell_name, "exec")
+            exec(code, user_global_ns, user_ns)
+            return True, None
+
+        # Separate the last expression
+        to_run_exec = nodelist[:-1]
+        last_expr = last_node
+
+        # Compile and execute all nodes except the last expression
+        if to_run_exec:
+            exec_code = compile(ast.Module(to_run_exec, []), cell_name, "exec")
+            exec(exec_code, user_global_ns, user_ns)
+
+        # Compile and evaluate the last expression
+        expr_code = compile(ast.Expression(last_expr.value), cell_name, "eval")
+        result = eval(expr_code, user_global_ns, user_ns)
+
+        return True, result
+
+    except Exception as e:
+        return False, str(e)
 
 
 @magics_class
@@ -36,16 +70,26 @@ class SignalsMagics(Magics):
             cleanup = EFFECTS.pop(name)
             cleanup()
 
-        display_handle = display(None, display_id=name)
+        display_handle = display(None, display_id=True)
         assert display_handle, "Failed to create display handle."
         shell = typing.cast("InteractiveShell", self.shell)
 
-        shell.run_cell(cell, cell_id=name)
-        clear_output()
+        transformed_cell = shell.transform_cell(cell)
+        cell_name = shell.compile.cache(
+            transformed_cell,
+            number=getattr(self, "excution_count", 0),
+            raw_code=cell,
+        )
+        code_ast = shell.compile.ast_parse(transformed_cell, filename=cell_name)
 
         def run_cell():
-            result = shell.run_cell(cell)
-            display_handle.update(result.result)
+            _, value = run_ast_nodes(
+                nodelist=code_ast.body,
+                cell_name=cell_name,
+                user_global_ns=shell.user_global_ns,
+                user_ns=shell.user_ns,
+            )
+            display_handle.update(value)
 
         EFFECTS[name] = effect(run_cell)
 
