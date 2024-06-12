@@ -275,6 +275,63 @@ class Select(Radio):
         return state
 
 
+class Text(Input[str]):
+    """A text input.
+
+    value: str | Signal[str]
+        The current value of the input.
+    label: str
+        A label for the input.
+    placeholder: str
+        A placeholder string for when the input is empty.
+    disabled: bool | Signal[bool]
+        Whether the input is disabled.
+    """
+
+    def __init__(
+        self,
+        *,
+        value: str | Signal[str] = "",
+        label: str | None = None,
+        placeholder: str | None = None,
+        disabled: bool | Signal[bool] = False,
+    ):
+        super().__init__(value, label=label, disabled=disabled)
+        self.placeholder = placeholder
+
+    def _get_anywidget_state(self, include):
+        state = super()._get_anywidget_state(include)
+        state["kind"] = "text"
+        state["options"].update({"placeholder": self.placeholder})
+        return state
+
+
+class Color(Input[str]):
+    """A color input.
+
+    value: str | Signal[str]
+        The current value of the input.
+    label: str
+        A label for the input.
+    disabled: bool | Signal[bool]
+        Whether the input is disabled.
+    """
+
+    def __init__(
+        self,
+        *,
+        value: str | Signal[str] = "#000000",
+        label: str | None = None,
+        disabled: bool | Signal[bool] = False,
+    ):
+        super().__init__(value, label=label, disabled=disabled)
+
+    def _get_anywidget_state(self, include):
+        state = super()._get_anywidget_state(include)
+        state["kind"] = "color"
+        return state
+
+
 class Form:
     _repr_mimebundle_ = MimeBundleDescriptor(
         _esm=pathlib.Path(__file__).parent / "widget.js",
@@ -289,3 +346,43 @@ class Form:
             "kind": "form",
             "inputs": [i._get_anywidget_state(include) for i in self.inputs],
         }
+
+
+class SignalProperty:
+    def __init__(self, signal):
+        self.signal = signal
+
+    def __get__(self, instance, owner):
+        return self.signal.value
+
+    def __set__(self, instance, value):
+        self.signal.value = value
+
+
+def form(*args, **kwargs):
+    """Dynamically create a form from a set of inputs."""
+    if args and kwargs:
+        raise ValueError("Cannot mix positional and keyword arguments.")
+    if args:
+        # If the first argument is a class, assume it's a custom form.
+        return Form(*args)
+
+    class CustomForm:
+        _repr_mimebundle_ = MimeBundleDescriptor(
+            _esm=pathlib.Path(__file__).parent / "widget.js",
+            autodetect_observer=False,
+        )
+
+        def __init__(self, **kwargs):
+            self._inner = Form(*kwargs.values())
+
+        def _get_anywidget_state(self, include):
+            return self._inner._get_anywidget_state(include)
+
+    # Add make the inputs properties of the form.
+    for key, input_ in kwargs.items():
+        if not input_.label:
+            input_.label = key
+        setattr(CustomForm, key, SignalProperty(input_))
+
+    return CustomForm(**kwargs)
