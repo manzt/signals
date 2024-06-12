@@ -338,34 +338,35 @@ class Form:
         autodetect_observer=False,
     )
 
-    def __init__(self, *inputs):
-        self.inputs = inputs
+    def __init__(self, *inputs: Input):
+        self._inputs = inputs
 
     def _get_anywidget_state(self, include):
         return {
             "kind": "form",
-            "inputs": [i._get_anywidget_state(include) for i in self.inputs],
+            "inputs": [i._get_anywidget_state(include) for i in self._inputs],
         }
 
 
-class SignalProperty:
-    def __init__(self, signal):
-        self.signal = signal
-
-    def __get__(self, instance, owner):
-        return self.signal.value
-
-    def __set__(self, instance, value):
-        self.signal.value = value
+class FormProtocol(typing.Protocol):
+    _repr_mimebundle_: MimeBundleDescriptor
 
 
-def form(*args, **kwargs):
-    """Dynamically create a form from a set of inputs."""
-    if args and kwargs:
-        raise ValueError("Cannot mix positional and keyword arguments.")
-    if args:
-        # If the first argument is a class, assume it's a custom form.
-        return Form(*args)
+class _InputProperty(typing.Generic[T]):
+    """A property that gets and sets the value of a signal."""
+
+    def __init__(self, _input: Input[T]):
+        self._input = _input
+
+    def __get__(self, instance, owner) -> T:
+        return self._input.value
+
+    def __set__(self, instance, value: T):
+        self._input.value = value
+
+
+def _create_custom_form(**kwargs: Input) -> FormProtocol:
+    """Dynamically create a form with custom inputs."""
 
     class CustomForm:
         _repr_mimebundle_ = MimeBundleDescriptor(
@@ -373,7 +374,7 @@ def form(*args, **kwargs):
             autodetect_observer=False,
         )
 
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: Input):
             self._inner = Form(*kwargs.values())
 
         def _get_anywidget_state(self, include):
@@ -383,6 +384,13 @@ def form(*args, **kwargs):
     for key, input_ in kwargs.items():
         if not input_.label:
             input_.label = key
-        setattr(CustomForm, key, SignalProperty(input_))
+        setattr(CustomForm, key, _InputProperty(input_))
 
     return CustomForm(**kwargs)
+
+
+def form(*args: Input, **kwargs: Input) -> FormProtocol:
+    """Create a form with the given inputs."""
+    if args and kwargs:
+        raise ValueError("Cannot mix positional and keyword arguments.")
+    return Form(*args) if args else _create_custom_form(**kwargs)
