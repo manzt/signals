@@ -61,13 +61,12 @@ a() + b() # re-evaluates the cell whenever a or b changes
 a.set(1)
 ```
 
-
 ## what
 
 Signals are a declarative programming model for updating based on fine-grained
 changes. With signals, application state is represented as a directed graph of
-relationships between other signals. However, the most important part of
-signals is that you don't need to manage the graph yourself.
+relationships between other signals. However, the most important part of signals
+is that you don't need to manage the graph yourself.
 
 Instead, you declare signals and their relationships, and the signal system
 automatically tracks dependencies and executes necessary computations when

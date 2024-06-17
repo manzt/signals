@@ -3,6 +3,13 @@ import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
 // @deno-types="npm:@preact/signals-core@1.6.0"
 import * as Signals from "https://esm.sh/@preact/signals-core@1.6.0";
 
+async function fetch_styles() {
+	const response = await fetch(
+		"https://raw.githubusercontent.com/observablehq/inputs/main/src/style.css",
+	);
+	return response.text();
+}
+
 /**
  * @param {HTMLFormElement} input
  */
@@ -53,14 +60,20 @@ function resolve_options(kind, options) {
 			return {
 				...options,
 				// @ts-expect-error - we want to fallback to `undefined` if `options.transform` is not a valid key
-				transform: { log: Math.log, sqrt: Math.sqrt }[options.transform],
+				transform: {
+					log: Math.log,
+					sqrt: Math.sqrt,
+				}[options.transform],
 			};
 		case "select":
 		case "radio":
 			return {
 				...options,
 				format: options.format
-					? (/** @type {unknown} */ _, /** @type {number} */ i) => {
+					? (
+						/** @type {unknown} */ _,
+						/** @type {number} */ i,
+					) => {
 						return options.format[i];
 					}
 					: undefined,
@@ -127,7 +140,9 @@ function create_input(kind, contents, options) {
 function connect_input(input, signal) {
 	const dispose = Signals.effect(() => {
 		input.value = signal.get();
-		input.dispatchEvent(new Event(eventof(input), { bubbles: true }));
+		input.dispatchEvent(
+			new Event(eventof(input), { bubbles: true }),
+		);
 	});
 	const on_change = () => {
 		signal.set(input.value);
@@ -157,16 +172,35 @@ export default () => {
 			);
 		},
 		/** @type {import("npm:@anywidget/types").Render} */
-		render({ el }) {
+		async render({ el }) {
+			const root = document.createElement("div");
+			el.appendChild(root);
+
+			const shadow = root.attachShadow({ mode: "closed" });
+
+			{
+				// apply styles
+				const style = document.createElement("style");
+				// TODO: bundle these styles into the widget
+				style.textContent = await fetch_styles();
+				shadow.appendChild(style);
+			}
+
 			const inputs = data.map((input) => {
-				const el = create_input(input.kind, input.content, input.options);
+				const el = create_input(
+					input.kind,
+					input.content,
+					input.options,
+				);
 				const dispose = connect_input(el, input.signal);
 				return { el, dispose };
 			});
 			const form = Inputs.form(inputs.map((d) => d.el));
-			el.appendChild(form);
+			shadow.appendChild(form);
+
 			return () => {
 				inputs.forEach((d) => d.dispose());
+				root.remove();
 			};
 		},
 	};
