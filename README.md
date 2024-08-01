@@ -5,7 +5,7 @@ A signals implementation for Python
 ## install
 
 ```python
-pip install signals # TODO: new name
+pip install signals
 ```
 
 ## usage

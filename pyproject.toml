@@ -1,7 +1,7 @@
 [project]
 name = "signals"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.0a1"
+description = "A reactive programming library for Python, implementing a signals system similar to @preact/signals"
 authors = [{ name = "Trevor Manz", email = "trevor.j.manz@gmail.com" }]
 dependencies = []
 readme = "README.md"
@@ -13,11 +13,7 @@ build-backend = "hatchling.build"
 
 [tool.rye]
 managed = true
-dev-dependencies = [
-    "pytest>=8.1.2",
-    "jupyterlab>=4.2.0",
-    "ipywidgets>=8.1.2",
-]
+dev-dependencies = ["pytest>=8.1.2", "jupyterlab>=4.2.0", "ipywidgets>=8.1.2"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -56,8 +52,8 @@ isort.required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = [
-    "D",      # no docstrings
-    "S",      # asserts in test functions
-    "PLR2004" # Magic value used in comparison
+    "D",       # no docstrings
+    "S",       # asserts in test functions
+    "PLR2004", # Magic value used in comparison
 ]
 "src/signals/__init__.py" = ["F401"]
