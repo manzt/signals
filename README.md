@@ -1,6 +1,6 @@
 # signals
 
-A signals implementation for Python
+primitives for transparent reactive programming in python
 
 ## install
 
