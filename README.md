@@ -15,22 +15,22 @@ from signals import Signal, computed, effect
 
 a = Signal(0)
 b = Signal(2)
-c = computed(lambda: a.value + b.value)
+c = computed(lambda: a() + b())
 
-print(c.value) # 2
+print(c()) # 2
 
-a.value = 1
-print(c.value) # 3
+a.set(1)
+print(c()) # 3
 
-b.value = 3
-print(c.value) # 4
+b.set(3)
+print(c()) # 4
 
 # Log the values of a, b, c whenever one changes
 @effect
 def log_abc():
-    print(a.value, b.value, c.value)
+    print(a(), b(), c())
 
-a.value = 2 # prints (2, 3, 5)
+a.set(2) # prints (2, 3, 5)
 ```
 
 ## cell magic
@@ -52,13 +52,13 @@ b = Signal(2)
 
 ```python
 %%effect
-a.value + b.value # re-evaluates the cell whenever a or b changes
+a() + b() # re-evaluates the cell whenever a or b changes
 ```
 
 `In[3]:`
 
 ```python
-a.value = 1
+a.set(1)
 ```
 
 
@@ -102,7 +102,7 @@ c = Counter(count=shared_count) # creates a signal internally
 #     self.comm.send('update', self.count)
 #
 # Updates b/c views because they share a signal, and have separate effects
-shared_count.value += 1
+shared_count.set(shared_count() + 1)
 ```
 
 ## development
