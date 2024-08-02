@@ -18,21 +18,20 @@ COMMS = weakref.WeakKeyDictionary()
 
 def _signal_comm(
     signal: Signal[T],
-    serialize=lambda x: x,
-    deserialize=lambda x: x,
+    serialize: typing.Callable = lambda x: x,
+    deserialize: typing.Callable = lambda x: x,
 ):
     if signal in COMMS:
         return COMMS[signal]
 
     comm = _comm_for(signal)
 
-    def send_state(update: T):
+    def send_state(update: T) -> None:
         state = {"value": serialize(update)}
-        comm.send(
-            data={"method": "update", "state": state, "buffer_paths": []}, buffers=[]
-        )
+        data = {"method": "update", "state": state, "buffer_paths": []}
+        comm.send(data=data, buffers=[])
 
-    def handle_msg(msg) -> None:
+    def handle_msg(msg: dict[str, typing.Any]) -> None:
         data = msg["content"]["data"]
         if data["method"] == "update":
             if "state" in data:
@@ -48,6 +47,10 @@ def _signal_comm(
 
     COMMS[signal] = comm
     return comm
+
+
+def _ensure_signal(value: T | Signal[T]) -> Signal[T]:
+    return value if isinstance(value, Signal) else Signal(value)
 
 
 T = typing.TypeVar("T")
@@ -77,8 +80,8 @@ class Input(typing.Generic[T]):
         label: str | None,
         disabled: bool | Signal[bool],
     ):
-        self._value: Signal[T] = value if isinstance(value, Signal) else Signal(value)
-        self.disabled = disabled if isinstance(disabled, Signal) else Signal(disabled)
+        self._value = _ensure_signal(value)
+        self.disabled = _ensure_signal(disabled)
         self.label = label
 
     def __call__(self) -> T:
@@ -102,8 +105,8 @@ class Input(typing.Generic[T]):
             "signal": f"signal:{_signal_comm(self._value).comm_id}",
             "options": {
                 "label": self.label,
-                "value": self._value,
-                "disabled": self.disabled,
+                "value": self._value.peek(),
+                "disabled": self.disabled.peek(),
             },
         }
 
@@ -205,14 +208,12 @@ class Range(Input):
         state = super()._get_anywidget_state(include)
         state["kind"] = "range"
         state["content"] = self.extent
-        state["options"].update(
-            {
-                "step": self.step,
-                "placeholder": self.placeholder,
-                "transform": self.transform,
-                "width": self.width,
-            }
-        )
+        state["options"].update({
+            "step": self.step,
+            "placeholder": self.placeholder,
+            "transform": self.transform,
+            "width": self.width,
+        })
         return state
 
 
@@ -255,9 +256,9 @@ class Radio(Input[T]):
         state = super()._get_anywidget_state(include)
         state["kind"] = "radio"
         state["content"] = self.options
-        state["options"].update(
-            {"format": list(map(self.format, self.options)) if self.format else None}
-        )
+        state["options"].update({
+            "format": list(map(self.format, self.options)) if self.format else None
+        })
         return state
 
 
