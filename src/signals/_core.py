@@ -73,11 +73,15 @@ class Signal(typing.Generic[T]):
         self._value = value
         self._children = set()
 
+    def __call__(self) -> T:
+        """Get the current value of the signal."""
+        return self.get()
+
     def __str__(self) -> str:
-        return f"{self.value}"
+        return f"{self()}"
 
     def __repr__(self) -> str:
-        return f"Signal({self.value})"
+        return f"Signal({self()})"
 
     # Recurse down all children, marking them as diry and adding
     # listeners to batch_pending
@@ -98,8 +102,7 @@ class Signal(typing.Generic[T]):
         """Get the current value of the signal without subscribing to changes."""
         return self._value
 
-    @property
-    def value(self) -> T:
+    def get(self) -> T:
         """Get the current value of the signal."""
         value = self._value
         if CURRENT_COMPUTED is not None:
@@ -112,8 +115,7 @@ class Signal(typing.Generic[T]):
 
         return value
 
-    @value.setter
-    def value(self, value: T) -> None:
+    def set(self, value: T) -> None:
         if (
             CURRENT_COMPUTED is not None
             and BATCH_PENDING is not None
@@ -142,7 +144,7 @@ class Signal(typing.Generic[T]):
         Callable[[], None]
             A function for unsubscribing from the signal.
         """
-        return effect(lambda: fn(self.value))
+        return effect(lambda: fn(self()))
 
 
 class Computed(Signal[T]):
@@ -176,6 +178,9 @@ class Computed(Signal[T]):
         self._weak = weakref.ref(self)
         self._parents = {}
         self._callback = callback
+
+    def __call__(self) -> T:
+        return self.get()
 
     def _wakeup(self):
         """Mark this computed as dirty whenever any of its parents change."""
@@ -238,8 +243,7 @@ class Computed(Signal[T]):
 
         return self._value
 
-    @property
-    def value(self) -> T:
+    def get(self) -> T:
         """Get the current value of the computed."""
         value = self.peek()
 
@@ -249,12 +253,11 @@ class Computed(Signal[T]):
 
         return value
 
-    @value.setter
-    def value(self, value: T) -> None:  # noqa: PLR6301
+    def set(self, value: T) -> None:  # noqa: PLR6301
         raise AttributeError("Computed singals are read-only")
 
     def __repr__(self) -> str:
-        return f"Computed({self.value})"
+        return f"Computed({self()})"
 
 
 def computed(fn: typing.Callable[[], T]) -> Computed[T]:
@@ -288,7 +291,7 @@ class Effect(Computed[T]):
         super().__init__(fn)
 
     def __repr__(self) -> str:
-        return f"Effect({self.value})"
+        return f"Effect({self()})"
 
     def _wakeup(self):
         """Mark this effect as dirty whenever any of its parents change."""
@@ -301,11 +304,11 @@ class Effect(Computed[T]):
         super()._wakeup()
 
     def _listen(self, callback: typing.Callable[[T], None]) -> Disposer:
-        old_value = self.value
+        old_value = self()
 
         def listener():
             nonlocal old_value
-            new_value = self.value
+            new_value = self()
             if old_value != new_value:
                 old_value = new_value
                 callback(old_value)
@@ -427,7 +430,7 @@ def on(deps: typing.Sequence[Signal], *, defer: bool = False):
     def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
         # The main effect function that will be run.
         def main():
-            return fn(*(dep.value for dep in deps))
+            return fn(*(dep() for dep in deps))
 
         func = main
 
@@ -437,7 +440,7 @@ def on(deps: typing.Sequence[Signal], *, defer: bool = False):
             def void():
                 nonlocal func
                 for dep in deps:
-                    dep.value  # noqa: B018
+                    dep()
                 func = main
 
             func = void
