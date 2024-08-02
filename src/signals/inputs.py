@@ -1,3 +1,5 @@
+"""Simple input widgets for use in Jupyter."""
+
 from __future__ import annotations
 
 import pathlib
@@ -14,8 +16,8 @@ from ._core import Signal
 COMMS = weakref.WeakKeyDictionary()
 
 
-def signal_comm(
-    signal: Signal,
+def _signal_comm(
+    signal: Signal[T],
     serialize=lambda x: x,
     deserialize=lambda x: x,
 ):
@@ -24,7 +26,7 @@ def signal_comm(
 
     comm = _comm_for(signal)
 
-    def send_state(update):
+    def send_state(update: T):
         state = {"value": serialize(update)}
         comm.send(
             data={"method": "update", "state": state, "buffer_paths": []}, buffers=[]
@@ -34,7 +36,7 @@ def signal_comm(
         data = msg["content"]["data"]
         if data["method"] == "update":
             if "state" in data:
-                signal.value = deserialize(data["state"]["value"])
+                signal.set(deserialize(data["state"]["value"]))
         elif data["method"] == "request_state":
             send_state(signal.peek())
         else:
@@ -75,32 +77,32 @@ class Input(typing.Generic[T]):
         label: str | None,
         disabled: bool | Signal[bool],
     ):
-        self._value = value if isinstance(value, Signal) else Signal(value)
-        self._disabled = disabled if isinstance(disabled, Signal) else Signal(disabled)
+        self._value: Signal[T] = value if isinstance(value, Signal) else Signal(value)
+        self.disabled = disabled if isinstance(disabled, Signal) else Signal(disabled)
         self.label = label
 
-    @property
-    def value(self):
-        return self._value.value
+    def __call__(self) -> T:
+        """Get the current value of the input."""
+        return self.get()
 
-    @value.setter
-    def value(self, update):
-        self._value.value = update
+    def get(self) -> T:
+        """Get the current value of the input."""
+        return self._value.get()
 
-    @property
-    def disabled(self):
-        return self._disabled.value
+    def set(self, update: T):
+        """Set the current value of the input."""
+        self._value.set(update)
 
-    @disabled.setter
-    def disabled(self, update):
-        self._disabled.value = update
+    def peek(self) -> T:
+        """Get the current value of the input without subscribing."""
+        return self._value.peek()
 
     def _get_anywidget_state(self, include) -> dict[str, typing.Any]:
         return {
-            "signal": f"signal:{signal_comm(self._value).comm_id}",
+            "signal": f"signal:{_signal_comm(self._value).comm_id}",
             "options": {
                 "label": self.label,
-                "value": self.value,
+                "value": self._value,
                 "disabled": self.disabled,
             },
         }
@@ -130,16 +132,21 @@ class Toggle(Input):
         super().__init__(value, label=label, disabled=disabled)
         self._values = values
 
-    @property
-    def value(self):
-        idx = 0 if self._value.value is True else 1
+    def get(self) -> typing.Any:
+        """Get the current value of the input."""
+        idx = 0 if self._value() is True else 1
         return self._values[idx]
 
-    @value.setter
-    def value(self, update):
+    def set(self, update: typing.Any):
+        """Set the current value of the input."""
         idx = self._values.index(update)
         assert idx != -1, f"Value must be one of {self._values}."
-        self._value.value = self._values.index(update) == 0
+        self._value.set(self._values.index(update) == 0)
+
+    def peek(self) -> typing.Any:
+        """Get the current value of the input without subscribing."""
+        idx = 0 if self._value.peek() is True else 1
+        return self._values[idx]
 
     def _get_anywidget_state(self, include):
         state = super()._get_anywidget_state(include)
@@ -224,7 +231,7 @@ class Radio(Input[T]):
         Whether the input is disabled.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         options: list[T] | dict[str, T],
         *,
@@ -333,64 +340,33 @@ class Color(Input[str]):
 
 
 class Form:
+    """A form input."""
+
     _repr_mimebundle_ = MimeBundleDescriptor(
         _esm=pathlib.Path(__file__).parent / "widget.js",
         autodetect_observer=False,
     )
 
-    def __init__(self, *inputs: Input):
-        self._inputs = inputs
+    @typing.overload
+    def __init__(self, *inputs: Input): ...
+
+    @typing.overload
+    def __init__(self, **inputs: Input): ...
+
+    def __init__(self, *args: Input, **kwargs: Input):
+        if args and kwargs:
+            raise ValueError("Cannot mix positional and keyword arguments.")
+        self._inputs = tuple(kwargs.values()) if len(args) == 0 else args
+
+        # if we have inputs as keyword arguments, set them as attributes
+        if kwargs:
+            for key, input_ in kwargs.items():
+                if not input_.label:
+                    input_.label = key
+                setattr(self, input_.label, input_)
 
     def _get_anywidget_state(self, include):
         return {
             "kind": "form",
             "inputs": [i._get_anywidget_state(include) for i in self._inputs],
         }
-
-
-class FormProtocol(typing.Protocol):
-    _repr_mimebundle_: MimeBundleDescriptor
-
-
-class _InputProperty(typing.Generic[T]):
-    """A property that gets and sets the value of a signal."""
-
-    def __init__(self, _input: Input[T]):
-        self._input = _input
-
-    def __get__(self, instance, owner) -> T:
-        return self._input.value
-
-    def __set__(self, instance, value: T):
-        self._input.value = value
-
-
-def _create_custom_form(**kwargs: Input) -> FormProtocol:
-    """Dynamically create a form with custom inputs."""
-
-    class CustomForm:
-        _repr_mimebundle_ = MimeBundleDescriptor(
-            _esm=pathlib.Path(__file__).parent / "widget.js",
-            autodetect_observer=False,
-        )
-
-        def __init__(self, **kwargs: Input):
-            self._inner = Form(*kwargs.values())
-
-        def _get_anywidget_state(self, include):
-            return self._inner._get_anywidget_state(include)
-
-    # Add make the inputs properties of the form.
-    for key, input_ in kwargs.items():
-        if not input_.label:
-            input_.label = key
-        setattr(CustomForm, key, _InputProperty(input_))
-
-    return CustomForm(**kwargs)
-
-
-def form(*args: Input, **kwargs: Input) -> FormProtocol:
-    """Create a form with the given inputs."""
-    if args and kwargs:
-        raise ValueError("Cannot mix positional and keyword arguments.")
-    return Form(*args) if args else _create_custom_form(**kwargs)
