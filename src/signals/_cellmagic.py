@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import typing
 
 from IPython.core.magic import Magics, cell_magic, magics_class
@@ -43,7 +44,7 @@ def run_ast_nodes(
     # If the last node is not an expression, run everything
     if not isinstance(nodelist[-1], ast.Expr):
         code = compile(ast.Module(nodelist, []), cell_name, "exec")
-        exec(code)
+        exec(code, user_global_ns, user_ns)
         return {}
 
     to_run_exec = nodelist[:-1]
@@ -135,10 +136,11 @@ class SignalsMagics(Magics):
             cleanup()
 
         shell = typing.cast("InteractiveShell", self.shell)
+        mode = os.environ.get("SIGNALS_MODE", args.mode)
 
-        if args.mode == "widget":
+        if mode == "widget":
             cleanup = prepare_cell_execution_ipywidgets(shell, cell)
-        elif args.mode == "displayhook":
+        elif mode == "displayhook":
             cleanup = prepare_cell_execution(shell, cell)
         else:
             raise ValueError(f"Invalid mode: {args.mode}")
