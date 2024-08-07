@@ -1,6 +1,6 @@
 [project]
 name = "signals"
-version = "0.1.0a1"
+version = "0.1.0a3"
 description = "A reactive programming library for Python, implementing a signals system similar to @preact/signals"
 authors = [{ name = "Trevor Manz", email = "trevor.j.manz@gmail.com" }]
 dependencies = []
