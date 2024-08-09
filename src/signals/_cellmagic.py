@@ -6,7 +6,7 @@ import typing
 
 from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
-from IPython.display import display
+from IPython.display import DisplayHandle, display
 
 from ._core import effect
 
@@ -58,8 +58,7 @@ def run_ast_nodes(
 
 
 def prepare_cell_execution(shell: InteractiveShell, raw_code: str):
-    display_handle = display(None, display_id=True)
-    assert display_handle, "Failed to create display handle."
+    dh = DisplayHandle()
     transformed_code = shell.transform_cell(raw_code)
     cell_name = shell.compile.cache(
         transformed_code=transformed_code,
@@ -77,10 +76,11 @@ def prepare_cell_execution(shell: InteractiveShell, raw_code: str):
                 user_ns=shell.user_ns,
             )
             if "value" in result:
-                display_handle.update(result["value"])
+                dh.update(result["value"])
         except Exception:
             shell.showtraceback()
 
+    dh.display(None)  # create the display
     return effect(run_cell)
 
 
@@ -121,8 +121,8 @@ class SignalsMagics(Magics):
     @argument(
         "--mode",
         type=str,
-        default="widget",
-        help="The output mode for the effect. Either 'widget' or 'displayhook'.",
+        default="displayhandle",
+        help="The output mode for the effect. Either 'widget' or 'displayhandle'.",
     )
     @cell_magic
     def effect(self, line, cell):
@@ -140,7 +140,7 @@ class SignalsMagics(Magics):
 
         if mode == "widget":
             cleanup = prepare_cell_execution_ipywidgets(shell, cell)
-        elif mode == "displayhook":
+        elif mode == "displayhandle":
             cleanup = prepare_cell_execution(shell, cell)
         else:
             raise ValueError(f"Invalid mode: {args.mode}")
