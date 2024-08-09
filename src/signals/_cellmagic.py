@@ -121,7 +121,7 @@ class SignalsMagics(Magics):
     @argument(
         "--mode",
         type=str,
-        default="widget",
+        default="displayhandle",
         help="The output mode for the effect. Either 'widget' or 'displayhandle'.",
     )
     @cell_magic
