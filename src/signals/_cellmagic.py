@@ -6,7 +6,7 @@ import typing
 
 from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
-from IPython.display import display, DisplayHandle
+from IPython.display import DisplayHandle, display
 
 from ._core import effect
 
@@ -140,7 +140,7 @@ class SignalsMagics(Magics):
 
         if mode == "widget":
             cleanup = prepare_cell_execution_ipywidgets(shell, cell)
-        elif mode == "displayhook":
+        elif mode == "displayhandle":
             cleanup = prepare_cell_execution(shell, cell)
         else:
             raise ValueError(f"Invalid mode: {args.mode}")
