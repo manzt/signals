@@ -1,7 +1,7 @@
 [project]
 name = "signals"
 version = "0.1.0a4"
-description = "A reactive programming library for Python, implementing a signals system similar to @preact/signals"
+description = "Primitives for transparent reactive programming in Python"
 authors = [{ name = "Trevor Manz", email = "trevor.j.manz@gmail.com" }]
 dependencies = []
 readme = "README.md"
@@ -51,9 +51,9 @@ select = [
 isort.required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.per-file-ignores]
+"src/signals/__init__.py" = ["F401"]
 "tests/*.py" = [
     "D",       # no docstrings
     "S",       # asserts in test functions
     "PLR2004", # Magic value used in comparison
 ]
-"src/signals/__init__.py" = ["F401"]

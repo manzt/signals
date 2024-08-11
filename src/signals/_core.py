@@ -1,4 +1,4 @@
-"""A signals implementation for Python based on @preact/signals."""
+"""Primitives for transparent reactive programming in Python."""
 
 from __future__ import annotations
 
