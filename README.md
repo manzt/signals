@@ -82,6 +82,10 @@ The key features of TRP include:
 
 ## why
 
+> [!NOTE]
+> These are very thoughts on TRP in interactive computing. I hope to develop
+> them into a paper or blog post later.
+
 TRP has proven effective in structuring programs that respond to events and
 update values over time, particularly in application programming. At its core,
 TRP is a paradigm for programming against values that change over time—a
