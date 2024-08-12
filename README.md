@@ -61,49 +61,47 @@ a() + b() # re-evaluates the cell whenever a or b changes
 a.set(1)
 ```
 
-
 ## what
 
-Signals are a declarative programming model for updating based on fine-grained
-changes. With signals, application state is represented as a directed graph of
-relationships between other signals. However, the most important part of
-signals is that you don't need to manage the graph yourself.
+`signals` is an implementation of transparent reactive programming (TRP) for Python.
 
-Instead, you declare signals and their relationships, and the signal system
-automatically tracks dependencies and executes necessary computations when
-values change. Singal-like constructs have been adopted by popular UI libraries
-and non-UI contexts (e.g., build systems to avoid uneccessary rebuilds).
+TRP is a declarative programming paradigm for expressing _relationships_ between
+values that vary over time. These time-varying values are known as _signals_.
+Whenever a signal changes, the system automatically updates all dependents.
+
+Spreadsheets are the classic example of TRP: cells linked by formulas update
+automatically when values change. The system discovers dependencies by
+observing data access, dynamically constructing a dependency graph.
+
+The key features of TRP include:
+
+- **declarative**: the programmer specifies relationships between values
+- **transparent**: the system (not the programmer) automatically tracks dependencies
+- **efficient**: the system performs only the necessary computations to ensure relationships hold over time
 
 ## why
 
-Signals are an easier way to manage state. We need something in Python other
-than callbacks and events. This repo is a playground to explore patterns for
-using a signal-based system in Python.
+TRP is exceptionally well-suited for interactive computing. Its mathematical
+foundations are simple and familiar, yet its application within interactive
+data analysis environments has been limited to spreadsheets.
 
-## ideas
+`signals` serves two main purposes:
 
-Signals for widgets
+- A standalone TRP implementation for Python
+- An integration of TRP into Jupyter-like environments
 
-```py
-@anywidget.dataclass
-class Counter:
-    count: int
+The main goal of `signals` is to provide stable and robust impelemtnation of
+TRP for Python, and to explore its use in data science workflows. Adopting
+these primitives at the analysis level offers several potential benefits:
 
-a = Counter(count=0) # creates a signal internally
+1.) It helps manage non-linearity other issues in complex/stateful notebooks.
 
-shared_count = Signal(0)
-b = Counter(count=shared_count) # creates a signal internally
-c = Counter(count=shared_count) # creates a signal internally
+2.) It gradually introduces reactive programming concepts to data science
+    workflows without requiring a total paradigm shift.
 
-# behind the scenes, creating Counter creates an effect to update the frontend view
-# when the count changes. E.g.,
-# @effect
-# def update():
-#     self.comm.send('update', self.count)
-#
-# Updates b/c views because they share a signal, and have separate effects
-shared_count.set(shared_count() + 1)
-```
+3.) It lays a foundation for transitioning from notebooks to more interactive
+    applications (e.g., dashboards) without introducing a completely new
+    programming model.
 
 ## development
 
