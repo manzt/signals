@@ -11,11 +11,12 @@ pip install signals
 ## usage
 
 ```python
-from signals import Signal, computed, effect
+from signals import Signal, effect
 
 a = Signal(0)
 b = Signal(2)
-c = computed(lambda: a() + b())
+def c():
+    return a() + b()
 
 print(c()) # 2
 
@@ -81,27 +82,54 @@ The key features of TRP include:
 
 ## why
 
-TRP is exceptionally well-suited for interactive computing. Its mathematical
-foundations are simple and familiar, yet its application within interactive
-data analysis environments has been limited to spreadsheets.
+TRP has proven effective in structuring programs that respond to events and
+update values over time, particularly in application programming. At its core,
+TRP is a paradigm for programming against values that change over time—a
+concept that extends beyond user interfaces to many other domains. Spreadsheets
+are a classic success story of TRP in action, which raises the question: why
+hasn't TRP been more widely adopted beyond spreadsheets, especially in other
+interactive computing environments like Jupyter notebooks?
 
-`signals` serves two main purposes:
+I strongly believe that TRP is a natural fit for interactive computing; it just
+has not yet found the right interface within popular tools to become mainstream.
 
-- A standalone TRP implementation for Python
-- An integration of TRP into Jupyter-like environments
+The reason for this limited adoption is not entirely clear, but my hypothesis
+is that it's largely cultural, and shaped by the strong influence of Jupyter in
+the data science community.
 
-The main goal of `signals` is to provide stable and robust impelemtnation of
-TRP for Python, and to explore its use in data science workflows. Adopting
-these primitives at the analysis level offers several potential benefits:
+Data scientists typically learn a batch-oriented programming style, where data
+is loaded, transformed, and analyzed in a linear sequence. This style of
+programming doesn’t benefit much from TRP concepts, as scripts are generally
+executed once to produce a final result. In contrast, application programming
+inherently requires managing state, and TRP has gained traction for its ability
+to model complex stateful systems with relatively simple, declarative code.
 
-1.) It helps manage non-linearity other issues in complex/stateful notebooks.
+Exploratory and interactive analysis in computational notebooks is often
+non-linear, even though much of linear style of programming. Since Jupyter code
+cells lack the reactivity semantics of spreadsheet cells, data scientists must
+manually re-execute cells whenever values change. This human-driven event loop
+is error-prone and can suffer from the same, if not worse, issues as
+event-driven programming: it’s easy to miss a dependent computation, leading to
+incorrect results.
 
-2.) It gradually introduces reactive programming concepts to data science
-    workflows without requiring a total paradigm shift.
+This process is akin to managing callbacks in event-driven programming, where
+understanding the execution flow and ensuring correctness requires keeping a
+lot of information in mind. The resulting complexity often obscures data
+synchronization bugs, making it difficult to assess the impact of a single
+change on the entire notebook. This limitation has led to common criticisms of
+computational notebooks, often misattributing the problem to interactive
+computing itself, when the real issue is the lack of reactivity.
 
-3.) It lays a foundation for transitioning from notebooks to more interactive
-    applications (e.g., dashboards) without introducing a completely new
-    programming model.
+The `signals` library introduces TRP to Python, with a focus on integrating
+with Jupyter. By gradually adding _signals_ to your notebooks, you can
+incrementally learn reactive programming. Notebook cells automatically respond
+to updates like spreadsheets, simplifying complex workflows.
+
+Unlike new notebook runtimes or kernels, `signals` is "just a library" that
+fits naturally within Jupyter without requiring special extensions. This makes
+it easy to adopt and experiment with in your existing code. Additionally, by
+making notebooks reactive, `signals` offers a pathway to transition notebook code
+into applications, such as dashboards, without a complete paradigm shift.
 
 ## development
 
