@@ -15,6 +15,7 @@ from signals import Signal, effect
 
 a = Signal(0)
 b = Signal(2)
+
 def c():
     return a() + b()
 
