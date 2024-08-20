@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import typing
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,7 +30,7 @@ def test_signal_notifies_other_listeners():
     spy3 = MagicMock(side_effect=s)
 
     effect(spy1)
-    dispose = effect(spy2)
+    dispose = effect(typing.cast(typing.Callable, spy2))
     effect(spy3)
 
     assert spy1.call_count == 1
@@ -140,7 +141,7 @@ def test_computed_notifies_listeners():
     c = computed(lambda: a() + b())
 
     spy = MagicMock(side_effect=c)
-    dispose = effect(spy)
+    dispose = effect(typing.cast(typing.Callable, spy))
     assert spy.call_count == 1
 
     a.set(a() + 1)
