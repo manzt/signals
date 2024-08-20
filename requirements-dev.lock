@@ -46,7 +46,7 @@ charset-normalizer==3.3.2
 comm==0.2.2
     # via ipykernel
     # via ipywidgets
-debugpy==1.8.3
+debugpy==1.8.5
     # via ipykernel
 decorator==5.1.1
     # via ipython
