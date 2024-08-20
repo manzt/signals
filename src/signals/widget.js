@@ -11,21 +11,6 @@ async function fetch_styles() {
 }
 
 /**
- * @param {HTMLFormElement} input
- */
-function eventof(input) {
-	switch (input.type) {
-		case "button":
-		case "submit":
-			return "click";
-		case "file":
-			return "change";
-		default:
-			return "input";
-	}
-}
-
-/**
  * @template T
  * @param {import("npm:@anywidget/types").AnyModel} model
  * @param {string} name
@@ -54,7 +39,6 @@ function create_signal(model, name) {
  * @param {Record<string, any>} options
  */
 function resolve_options(kind, options) {
-	console.log({ kind, format: options.format });
 	switch (kind) {
 		case "range":
 			return {
@@ -133,6 +117,23 @@ function create_input(kind, contents, options) {
 }
 
 /**
+ * JupyterLab tries to soak up all keyboard events, so we need to stop them
+ * from bubbling up to the document.
+ */
+function stop_propagation(/** @type {HTMLFormElement} */ input) {
+	const events = ["keydown", "keypress", "keyup"];
+	const listener = (/** @type {Event} */ event) => event.stopPropagation();
+	for (const event of events) {
+		input.addEventListener(event, listener);
+	}
+	return () => {
+		for (const event of events) {
+			input.removeEventListener(event, listener);
+		}
+	};
+}
+
+/**
  * @template T
  * @param {HTMLFormElement} input
  * @param {{ get(): T, set(value: T): void }} signal
@@ -140,17 +141,18 @@ function create_input(kind, contents, options) {
 function connect_input(input, signal) {
 	const dispose = Signals.effect(() => {
 		input.value = signal.get();
-		input.dispatchEvent(
-			new Event(eventof(input), { bubbles: true }),
-		);
+		input.dispatchEvent(new Event("input", { bubbles: true }));
 	});
-	const on_change = () => {
+	const dispose_propagation = stop_propagation(input);
+	const listener = (/** @type {Event} */ event) => {
+		event.stopPropagation();
 		signal.set(input.value);
 	};
-	input.addEventListener(eventof(input), on_change);
+	input.addEventListener("input", listener);
 	return () => {
 		dispose();
-		input.removeEventListener(eventof(input), on_change);
+		dispose_propagation();
+		input.removeEventListener("input", listener);
 	};
 }
 
