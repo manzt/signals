@@ -6,12 +6,16 @@ import pathlib
 import typing
 import weakref
 
-from anywidget._descriptor import (
-    MimeBundleDescriptor,  # noqa: PLC2701
-    _comm_for,  # noqa: PLC2701
-)
-
 from ._core import Signal
+
+try:
+    from anywidget._descriptor import MimeBundleDescriptor, _comm_for  # noqa: PLC2701
+except ImportError as e:
+    raise ImportError(
+        "anywidget is required to use the signals.inputs. "
+        "Please install it with `pip install anywidget`."
+    ) from e
+
 
 COMMS = weakref.WeakKeyDictionary()
 
@@ -208,14 +212,12 @@ class Range(Input):
         state = super()._get_anywidget_state(include)
         state["kind"] = "range"
         state["content"] = self.extent
-        state["options"].update(
-            {
-                "step": self.step,
-                "placeholder": self.placeholder,
-                "transform": self.transform,
-                "width": self.width,
-            }
-        )
+        state["options"].update({
+            "step": self.step,
+            "placeholder": self.placeholder,
+            "transform": self.transform,
+            "width": self.width,
+        })
         return state
 
 
@@ -258,9 +260,9 @@ class Radio(Input[T]):
         state = super()._get_anywidget_state(include)
         state["kind"] = "radio"
         state["content"] = self.options
-        state["options"].update(
-            {"format": list(map(self.format, self.options)) if self.format else None}
-        )
+        state["options"].update({
+            "format": list(map(self.format, self.options)) if self.format else None
+        })
         return state
 
 
