@@ -89,10 +89,10 @@ the right interface in popular tools to go mainstream. You can read more of my
 
 ## development
 
-this project uses [`rye`](https://rye-up.com/) for development.
+this project uses [`uv`](https://github.com/astral-sh/uv) for development.
 
 ```sh
-rye lint # lints code
-rye fmt  # formats code
-rye test # runs tests
+uv run ruff lint # lints code
+uv run ruff format # formats code
+uv run pytest # run tests
 ```
