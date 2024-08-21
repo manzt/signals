@@ -1,19 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "signals"
 version = "0.1.0a4"
 description = "Primitives for transparent reactive programming in Python"
 authors = [{ name = "Trevor Manz", email = "trevor.j.manz@gmail.com" }]
-dependencies = []
+dependencies = [
+    "signals",
+]
 readme = "README.md"
 requires-python = ">= 3.8"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.1.2",
+    "ruff>=0.6.1"
+]
 
-[tool.rye]
-managed = true
-dev-dependencies = ["pytest>=8.1.2", "jupyterlab>=4.2.0", "ipywidgets>=8.1.2"]
+[tool.uv.sources]
+signals = { workspace = true }
 
 [tool.hatch.metadata]
 allow-direct-references = true
