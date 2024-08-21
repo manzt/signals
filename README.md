@@ -92,7 +92,7 @@ the right interface in popular tools to go mainstream. You can read more of my
 this project uses [`uv`](https://github.com/astral-sh/uv) for development.
 
 ```sh
-uv run ruff lint # lints code
+uv run ruff check  # lints code
 uv run ruff format # formats code
-uv run pytest # run tests
+uv run pytest      # run tests
 ```
