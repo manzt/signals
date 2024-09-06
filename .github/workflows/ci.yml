@@ -15,8 +15,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          curl -LsSf https://astral.sh/uv/0.3.0/install.sh | sh
+      - uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.4.6"
       - run: uv run ruff check
 
   Test:
@@ -25,6 +26,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          curl -LsSf https://astral.sh/uv/0.3.0/install.sh | sh
+      - uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.4.6"
       - run: uv run pytest
