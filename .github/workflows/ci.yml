@@ -15,11 +15,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: eifinger/setup-rye@v3
+      - uses: astral-sh/setup-uv@v2
         with:
-          version: '0.33.0'
-      - run: rye config --set-bool behavior.use-uv=true
-      - run: rye lint
+          version: "0.4.6"
+      - run: uv run ruff check
 
   Test:
     runs-on: macos-14
@@ -27,8 +26,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: eifinger/setup-rye@v3
+      - uses: astral-sh/setup-uv@v2
         with:
-          version: '0.33.0'
-      - run: rye config --set-bool behavior.use-uv=true
-      - run: rye test
+          version: "0.4.6"
+      - run: uv run pytest

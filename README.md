@@ -11,11 +11,13 @@ pip install signals
 ## usage
 
 ```python
-from signals import Signal, computed, effect
+from signals import Signal, effect
 
 a = Signal(0)
 b = Signal(2)
-c = computed(lambda: a() + b())
+
+def c():
+    return a() + b()
 
 print(c()) # 2
 
@@ -63,53 +65,34 @@ a.set(1)
 
 ## what
 
-Signals are a declarative programming model for updating based on fine-grained
-changes. With signals, application state is represented as a directed graph of
-relationships between other signals. However, the most important part of signals
-is that you don't need to manage the graph yourself.
+`signals` is an implementation of transparent reactive programming (TRP) for Python.
 
-Instead, you declare signals and their relationships, and the signal system
-automatically tracks dependencies and executes necessary computations when
-values change. Singal-like constructs have been adopted by popular UI libraries
-and non-UI contexts (e.g., build systems to avoid uneccessary rebuilds).
+TRP is a declarative programming paradigm for expressing _relationships_ between
+values that vary over time. These time-varying values are known as _signals_.
+Whenever a signal changes, the system automatically updates all dependents.
+
+Spreadsheets are the classic example of TRP: cells linked by formulas update
+automatically when values change. The system discovers dependencies by
+observing data access, dynamically constructing a dependency graph.
+
+The key features of TRP include:
+
+- **declarative**: the programmer specifies relationships between values
+- **transparent**: the system (not the programmer) automatically tracks dependencies
+- **efficient**: the system performs only the necessary computations to ensure relationships hold over time
 
 ## why
 
-Signals are an easier way to manage state. We need something in Python other
-than callbacks and events. This repo is a playground to explore patterns for
-using a signal-based system in Python.
-
-## ideas
-
-Signals for widgets
-
-```py
-@anywidget.dataclass
-class Counter:
-    count: int
-
-a = Counter(count=0) # creates a signal internally
-
-shared_count = Signal(0)
-b = Counter(count=shared_count) # creates a signal internally
-c = Counter(count=shared_count) # creates a signal internally
-
-# behind the scenes, creating Counter creates an effect to update the frontend view
-# when the count changes. E.g.,
-# @effect
-# def update():
-#     self.comm.send('update', self.count)
-#
-# Updates b/c views because they share a signal, and have separate effects
-shared_count.set(shared_count() + 1)
-```
+TL;DR - TRP is a natural fit for interactive computing but has so far lacked
+the right interface in popular tools to go mainstream. You can read more of my
+[unfinished thoughts](./notes.md) on this topic.
 
 ## development
 
-this project uses [`rye`](https://rye-up.com/) for development.
+this project uses [`uv`](https://github.com/astral-sh/uv) for development.
 
 ```sh
-rye lint # lints code
-rye fmt  # formats code
-rye test # runs tests
+uv run ruff check  # lints code
+uv run ruff format # formats code
+uv run pytest      # run tests
 ```
