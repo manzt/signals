@@ -15,7 +15,14 @@ requires-python = ">= 3.8"
 inputs = ["anywidget>=0.9.0"]
 
 [tool.uv]
-dev-dependencies = ["anywidget[dev]>=0.9.13", "pytest>=8.1.2", "ruff>=0.6.1"]
+dev-dependencies = [
+    "anywidget[dev]>=0.9.13",
+    "jupyterlab>=4.2.5",
+    "polars>=1.7.1",
+    "pytest>=8.1.2",
+    "ruff>=0.6.1",
+    "vega-datasets>=0.9.0",
+]
 
 [tool.uv.sources]
 signals = { workspace = true }
