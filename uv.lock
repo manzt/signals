@@ -1760,10 +1760,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "anywidget", marker = "extra == 'inputs'", specifier = ">=0.9.0" },
-    { name = "signals", editable = "." },
-]
+requires-dist = [{ name = "anywidget", marker = "extra == 'inputs'", specifier = ">=0.9.0" }]
 
 [package.metadata.requires-dev]
 dev = [
