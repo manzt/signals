@@ -1,3 +1,4 @@
+# Copyright (c) 2024 Trevor Manz
 """Primitives for transparent reactive programming in Python."""
 
 from __future__ import annotations
@@ -74,7 +75,15 @@ class Signal(typing.Generic[T]):
         self._children = set()
 
     def __call__(self) -> T:
-        """Get the current value of the signal."""
+        """Get the current value of the signal.
+
+        An alias for the `get` method.
+
+        Returns
+        -------
+        T
+            The current value of the signal.
+        """
         return self.get()
 
     def __str__(self) -> str:
@@ -85,12 +94,12 @@ class Signal(typing.Generic[T]):
 
     # Recurse down all children, marking them as diry and adding
     # listeners to batch_pending
-    def _wakeup(self):
+    def _wakeup(self) -> None:
         to_remove = set()
         for child_ref in self._children:
             child = child_ref()
             if child is not None:
-                child._wakeup()
+                child._wakeup()  # noqa: SLF001
             else:
                 to_remove.add(child_ref)
 
@@ -98,12 +107,24 @@ class Signal(typing.Generic[T]):
             # If the child has been garbage collected, remove it from the set
             self._children.remove(child_ref)
 
-    def peek(self):
-        """Get the current value of the signal without subscribing to changes."""
+    def peek(self) -> T:
+        """Get the current value of the signal without subscribing to changes.
+
+        Returns
+        -------
+        T
+            The current value of the signal.
+        """
         return self._value
 
     def get(self) -> T:
-        """Get the current value of the signal."""
+        """Get the current value of the signal.
+
+        Returns
+        -------
+        T
+            The current value of the signal.
+        """
         value = self._value
         if CURRENT_COMPUTED is not None:
             # this is ued to detect infinite cycles
@@ -111,17 +132,30 @@ class Signal(typing.Generic[T]):
                 PROCESSING_SIGNALS.add(self)
 
             # if accessing inside of a computed, add this to the computed's parents
-            CURRENT_COMPUTED._add_dependency(self, value)
+            CURRENT_COMPUTED._add_dependency(self, value)  # noqa: SLF001
 
         return value
 
     def set(self, value: T) -> None:
+        """Set the value of the signal.
+
+        Parameters
+        ----------
+        value : T
+            The new value of the signal.
+
+        Raises
+        ------
+        RuntimeError
+            If a cycle is detected when updating the signal.
+        """
         if (
             CURRENT_COMPUTED is not None
             and BATCH_PENDING is not None
             and self in PROCESSING_SIGNALS
         ):
-            raise RuntimeError("Cycle detected")
+            msg = "Cycle detected"
+            raise RuntimeError(msg)
 
         self._value = value
 
@@ -130,7 +164,8 @@ class Signal(typing.Generic[T]):
         batch(self._wakeup)
 
     def subscribe(
-        self, fn: typing.Callable[[T], typing.Any]
+        self,
+        fn: typing.Callable[[T], typing.Any],
     ) -> typing.Callable[[], None]:
         """Subscribe to changes in the signal.
 
@@ -179,28 +214,32 @@ class Computed(Signal[T]):
         self._parents = {}
         self._callback = callback
 
-    def __call__(self) -> T:
-        return self.get()
-
-    def _wakeup(self):
+    def _wakeup(self) -> None:
         """Mark this computed as dirty whenever any of its parents change."""
         self._dirty = True
         super()._wakeup()
 
-    def _add_dependency(self, parent: Signal, value: typing.Any) -> None:
+    def _add_dependency(self, parent: Signal, value: object) -> None:
         """Add the Signal as a dependency of this computed.
 
         Called when another Signal's .value is accessed inside of this computed.
         """
         self._parents[parent] = value
-        parent._children.add(self._weak)
+        parent._children.add(self._weak)  # noqa: SLF001
 
-    def _remove_dependencies(self):
+    def _remove_dependencies(self) -> None:
         """Remove all links between this computed and its dependencies."""
         for parent in self._parents:
-            parent._children.remove(self._weak)
+            parent._children.remove(self._weak)  # noqa: SLF001
 
     def peek(self) -> T:
+        """Get the current value of the computed without subscribing to changes.
+
+        Returns
+        -------
+        T
+            The current value of the computed.
+        """
         global CURRENT_COMPUTED  # noqa: PLW0603
 
         if self._dirty:
@@ -231,7 +270,7 @@ class Computed(Signal[T]):
                         self._value = self._callback()
                     finally:
                         CURRENT_COMPUTED = old
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 self._has_error = True
                 # We reuse the _value slot for the error, instead of using
                 # a separate property
@@ -244,17 +283,31 @@ class Computed(Signal[T]):
         return self._value
 
     def get(self) -> T:
-        """Get the current value of the computed."""
+        """Get the current value of the computed.
+
+        Returns
+        -------
+        T
+            The current value of the computed.
+        """
         value = self.peek()
 
         if CURRENT_COMPUTED is not None:
             # If accessing inside of a computed, add this to the computed's parents
-            CURRENT_COMPUTED._add_dependency(self, value)
+            CURRENT_COMPUTED._add_dependency(self, value)  # noqa: SLF001
 
         return value
 
-    def set(self, value: T) -> None:  # noqa: PLR6301
-        raise AttributeError("Computed singals are read-only")
+    def set(self, value: T) -> None:  # noqa: ARG002, PLR6301
+        """Set the value of the computed (not allowed).
+
+        Raises
+        ------
+        AttributeError
+            Computed signals are read-only
+        """
+        msg = "Computed singals are read-only"
+        raise AttributeError(msg)
 
     def __repr__(self) -> str:
         return f"Computed({self()})"
@@ -293,10 +346,17 @@ class Effect(Computed[T]):
     def __repr__(self) -> str:
         return f"Effect({self()})"
 
-    def _wakeup(self):
-        """Mark this effect as dirty whenever any of its parents change."""
+    def _wakeup(self) -> None:
+        """Mark this effect as dirty whenever any of its parents change.
+
+        Raises
+        ------
+        RuntimeError
+            If the batch_pending is invalid.
+        """
         if BATCH_PENDING is None:
-            raise RuntimeError("invalid batch_pending")
+            msg = "invalid batch_pending"
+            raise RuntimeError(msg)
 
         if self._listener is not None:
             BATCH_PENDING.add(self._listener)
@@ -306,7 +366,7 @@ class Effect(Computed[T]):
     def _listen(self, callback: typing.Callable[[T], None]) -> Disposer:
         old_value = self()
 
-        def listener():
+        def listener() -> None:
             nonlocal old_value
             new_value = self()
             if old_value != new_value:
@@ -316,7 +376,7 @@ class Effect(Computed[T]):
         self._listener = listener
         callback(old_value)
 
-        def dispose():
+        def dispose() -> None:
             self._listener = None
             self._remove_dependencies()
 
@@ -343,7 +403,7 @@ def _effect(fn: typing.Callable[[], None]) -> Disposer:
     Callable[[], None]
         A function for disposing the effect.
     """
-    return Effect(lambda: batch(fn))._listen(lambda _: None)
+    return Effect(lambda: batch(fn))._listen(lambda _: None)  # noqa: SLF001
 
 
 @typing.overload
@@ -398,18 +458,20 @@ def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
 def effect(*args, **kwargs) -> typing.Callable:
     """Create an effect to run arbitrary code in response to signal changes."""
     if len(args) == 1 and callable(args[0]):
-        return _effect(args[0])
+        return _effect(args[0])  # noqa: DOC201
 
     deps = args[0] if len(args) == 1 else kwargs.get("deps", [])
     defer = kwargs.get("defer", False)
 
-    def wrap(fn):
+    def wrap(fn: typing.Callable[[], None]) -> Disposer:
         return _effect(on(deps=deps, defer=defer)(fn))
 
     return wrap
 
 
-def on(deps: typing.Sequence[Signal], *, defer: bool = False):
+def on(
+    deps: typing.Sequence[Signal], *, defer: bool = False,
+) -> typing.Callable[[typing.Callable[..., None]], typing.Callable[[], None]]:
     """Make dependencies for a function explicit.
 
     Parameters
@@ -429,7 +491,7 @@ def on(deps: typing.Sequence[Signal], *, defer: bool = False):
 
     def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
         # The main effect function that will be run.
-        def main():
+        def main() -> None:
             return fn(*(dep() for dep in deps))
 
         func = main
@@ -437,7 +499,7 @@ def on(deps: typing.Sequence[Signal], *, defer: bool = False):
         if defer:
             # Create a void function that accesses all of the
             # dependencies so they will be tracked in an effect.
-            def void():
+            def void() -> None:
                 nonlocal func
                 for dep in deps:
                     dep()

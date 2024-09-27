@@ -1,3 +1,4 @@
+# Copyright (c) 2024 Trevor Manz
 from __future__ import annotations
 
 import typing
@@ -8,23 +9,23 @@ import pytest
 from signals import Signal, computed, effect
 
 
-def test_signal_return_value():
+def test_signal_return_value() -> None:
     v = [1, 2]
     s = Signal(v)
     assert s() == v
     assert s.get() == v
 
 
-def test_signal_inherits_from_Signal():
+def test_signal_inheritance() -> None:
     assert isinstance(Signal(0), Signal)
 
 
-def test_signal_to_string():
+def test_signal_to_string() -> None:
     s = Signal(123)
     assert str(s) == "123"
 
 
-def test_signal_notifies_other_listeners():
+def test_signal_notifies_other_listeners() -> None:
     s = Signal(0)
     spy1 = MagicMock(side_effect=s)
     spy2 = MagicMock(side_effect=s)
@@ -51,18 +52,18 @@ def test_signal_notifies_other_listeners():
     assert spy3.call_count == 3
 
 
-def test_signal_peek():
+def test_signal_peek() -> None:
     s = Signal(1)
     assert s.peek() == 1
 
 
-def test_signal_peek_after_value_change():
+def test_signal_peek_after_value_change() -> None:
     s = Signal(1)
     s.set(2)
     assert s.peek() == 2
 
 
-def test_signal_peek_not_depend_on_surrounding_effect():
+def test_signal_peek_not_depend_on_surrounding_effect() -> None:
     s = Signal(1)
     spy = MagicMock(s.peek)
 
@@ -73,7 +74,7 @@ def test_signal_peek_not_depend_on_surrounding_effect():
     assert spy.call_count == 1
 
 
-def test_basic_computed():
+def test_basic_computed() -> None:
     a = Signal("hello")
     b = Signal("world")
     c = computed(lambda: f"{a} {b}")
@@ -84,14 +85,14 @@ def test_basic_computed():
     assert c() == "hello foo"
 
 
-def test_computed_is_readonly():
+def test_computed_is_readonly() -> None:
     a = Signal(0)
     b = computed(lambda: a() + 1)
     with pytest.raises(AttributeError):
         b.set(10)
 
 
-def test_signal_peek_not_depend_on_surrounding_computed():
+def test_signal_peek_not_depend_on_surrounding_computed() -> None:
     s = Signal(1)
     spy = MagicMock(s.peek)
     d = computed(spy)
@@ -104,7 +105,7 @@ def test_signal_peek_not_depend_on_surrounding_computed():
     assert spy.call_count == 1
 
 
-def test_signal_subscribe():
+def test_signal_subscribe() -> None:
     spy = MagicMock()
     a = Signal(1)
 
@@ -113,7 +114,7 @@ def test_signal_subscribe():
     assert spy.call_args[0][0] == 1
 
 
-def test_signal_subscribe_value_change():
+def test_signal_subscribe_value_change() -> None:
     spy = MagicMock()
     a = Signal(1)
 
@@ -124,7 +125,7 @@ def test_signal_subscribe_value_change():
     assert spy.call_args[0][0] == 2
 
 
-def test_signal_unsubscribe():
+def test_signal_unsubscribe() -> None:
     spy = MagicMock()
     a = Signal(1)
 
@@ -136,7 +137,7 @@ def test_signal_unsubscribe():
     assert spy.call_count == 0
 
 
-def test_computed_notifies_listeners():
+def test_computed_notifies_listeners() -> None:
     a = Signal(0)
     b = Signal(0)
     c = computed(lambda: a() + b())
@@ -154,7 +155,7 @@ def test_computed_notifies_listeners():
     assert spy.call_count == 3
 
 
-def test_computed_computed():
+def test_computed_computed() -> None:
     a = Signal(0)
     b = Signal(0)
     c = computed(lambda: a() + b())
@@ -168,16 +169,16 @@ def test_computed_computed():
     assert d() == 6
 
 
-def test_explicit_dependencies():
+def test_explicit_dependencies() -> None:
     a = Signal(42)
     b = Signal(35)
 
     spy = MagicMock()
 
     @effect(deps=(a, b))
-    def _(av, _):
+    def _(avalue: int, _bvalue: int) -> None:
         # We want to make sure the effect works even if bv is never accessed
-        spy(av if True else _)
+        spy(avalue if True else _bvalue)
 
     spy.assert_called_once()
     spy.assert_called_with(42)
@@ -187,15 +188,15 @@ def test_explicit_dependencies():
     spy.assert_called_with(42)
 
 
-def test_explicit_dependencies_deferred():
+def test_explicit_dependencies_deferred() -> None:
     a = Signal(42)
     b = Signal(35)
 
     spy = MagicMock()
 
     @effect(deps=(a, b), defer=True)
-    def _(av, bv):
-        spy(av, bv)
+    def _(value: int, bvalue: int) -> None:
+        spy(value, bvalue)
 
     spy.assert_not_called()
     a.set(1)

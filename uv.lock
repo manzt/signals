@@ -100,7 +100,6 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "signals", editable = "." }]
 
 [package.metadata.requires-dev]
 dev = [
