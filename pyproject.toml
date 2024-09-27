@@ -7,15 +7,11 @@ name = "signals"
 version = "0.1.0a4"
 description = "Primitives for transparent reactive programming in Python"
 authors = [{ name = "Trevor Manz", email = "trevor.j.manz@gmail.com" }]
-dependencies = ["signals"]
 readme = "README.md"
 requires-python = ">= 3.8"
 
 [tool.uv]
 dev-dependencies = ["pytest>=8.1.2", "ruff>=0.6.1"]
-
-[tool.uv.sources]
-signals = { workspace = true }
 
 [tool.hatch.metadata]
 allow-direct-references = true
