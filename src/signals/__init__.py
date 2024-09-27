@@ -1,3 +1,4 @@
+# Copyright (c) 2024 Trevor Manz
 """Primitives for transparent reactive programming in Python."""
 
 from __future__ import annotations
@@ -6,7 +7,7 @@ from ._core import Signal, batch, computed, effect
 from ._version import __version__
 
 
-def load_ipython_extension(ipython):
+def load_ipython_extension(ipython) -> None:  # noqa: ANN001
     """Load the IPython extension.
 
     `%load_ext signals` will load the extension and enable the `%%effect` cell magic.
