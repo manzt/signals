@@ -1,0 +1,11 @@
+{
+	"lock": false,
+	"compilerOptions": {
+		"checkJs": true,
+		"allowJs": true,
+		"lib": ["ES2020", "DOM", "DOM.Iterable"]
+	},
+	"fmt": {
+		"useTabs": true
+	}
+}

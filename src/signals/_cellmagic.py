@@ -104,10 +104,10 @@ def prepare_cell_execution_ipywidgets(
     def run_cell() -> None:
         shell.run_cell(raw_code)
 
-    cell_effect = effect(run_cell)
+    cleanup_effect = effect(run_cell)
 
     def cleanup() -> None:
-        cell_effect()
+        cleanup_effect()
         output_widget.close()
 
     return cleanup
