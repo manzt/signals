@@ -163,7 +163,7 @@ class Signal(typing.Generic[T]):
         # children will be fully marked as dirty before triggering any listeners
         batch(self._wakeup)
 
-    # TODO: Should we have this method?
+    # TODO: Should we have this method?  # noqa: FIX002, TD002, TD003
     def subscribe(
         self,
         fn: typing.Callable[[T], typing.Any],
