@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from signals import Signal, computed, effect
+from signals import Signal, computed, context, effect, effect_scope
+
+T = typing.TypeVar("T")
 
 
 def test_signal_return_value() -> None:
@@ -201,3 +203,205 @@ def test_explicit_dependencies_deferred() -> None:
     spy.assert_not_called()
     a.set(1)
     spy.assert_called_once_with(1, 35)
+
+
+def test_propagates_changes_through_computeds() -> None:
+    src = Signal(0)
+    c1 = computed(lambda: src() % 2)
+    c2 = computed(c1)
+    c3 = computed(c2)
+
+    c3()
+    src.set(1)  # c1 -> dirty, c2 -> toCheckDirty, c3 -> toCheckDirty
+    c2()  # c1 -> none, c2 -> none
+    src.set(3)  # c1 -> dirty, c2 -> toCheckDirty
+
+    assert c3() == 1
+
+
+def test_clears_subscriptions_when_untracked_by_all_subscribers() -> None:
+    a = Signal(1)
+    b = computed(lambda: a() * 2)
+    spy = MagicMock(side_effect=b)
+    dispose = effect(typing.cast("typing.Callable", spy))
+
+    assert spy.call_count == 1
+    a.set(2)
+    assert spy.call_count == 2
+    dispose()
+    a.set(3)
+    assert spy.call_count == 2
+
+
+def test_does_not_run_untracked_inner_effect() -> None:
+    a = Signal(3)
+    b = computed(lambda: a() > 0)
+
+    @effect
+    def _() -> None:
+        if b():
+
+            @effect
+            def _() -> None:
+                if a() == 0:
+                    pytest.fail("Should never happen")
+
+    a.set(a() - 1)
+    a.set(a() - 1)
+    a.set(a() - 1)
+
+
+def test_runs_outer_effect_first() -> None:
+    a = Signal(1)
+    b = Signal(1)
+
+    @effect
+    def _() -> None:
+        if a():
+
+            @effect
+            def _() -> None:
+                b()
+                if a() == 0:
+                    pytest.fail("Should not happen")
+
+    with context.batch():
+        b.set(0)
+        a.set(0)
+
+
+def test_does_not_trigger_inner_effect_when_resolve_maybe_dirty() -> None:
+    a = Signal(0)
+    b = computed(lambda: a() % 2)
+    spy = MagicMock()
+
+    @effect
+    def _() -> None:
+        @effect
+        def _() -> None:
+            b()
+            spy()
+
+    a.set(2)
+    assert spy.call_count == 1
+
+
+def test_triggers_inner_effects_in_sequence() -> None:
+    a = Signal(0)
+    b = Signal(0)
+    c = computed(lambda: a() - b())
+    order: list[str] = []
+
+    @effect
+    def _() -> None:
+        c()
+
+        @effect
+        def _() -> None:
+            order.append("first inner")
+            a()
+
+        @effect
+        def _() -> None:
+            order.append("last inner")
+            a()
+            b()
+
+    order.clear()
+    with context.batch():
+        b.set(1)
+        a.set(1)
+
+    assert order == ["first inner", "last inner"]
+
+
+def test_custom_batched_effect() -> None:
+    def batch_effect(fn: typing.Callable[[], None]) -> None:
+        @effect
+        def _() -> None:
+            with context.batch():
+                return fn()
+
+        return _
+
+    logs: list[str] = []
+    a = Signal(0)
+    b = Signal(0)
+
+    @computed
+    def aa() -> None:
+        logs.append("aa-0")
+        if a() == 0:
+            b.set(1)
+        logs.append("aa-1")
+
+    @computed
+    def bb() -> None:
+        logs.append("bb")
+        b()
+
+    batch_effect(bb)
+    batch_effect(aa)
+
+    assert logs == ["bb", "aa-0", "aa-1", "bb"]
+
+
+def test_duplicate_subscribers_do_not_affect_notify_order() -> None:
+    src1 = Signal(0)
+    src2 = Signal(0)
+    order: list[str] = []
+
+    @effect
+    def _() -> None:
+        order.append("a")
+        with context.pause_tracking():
+            is_one = src2() == 1
+        if is_one:
+            src1()
+        src2()
+        src1()
+
+    @effect
+    def _() -> None:
+        order.append("b")
+        src1()
+
+    src2.set(1)  # src1.subs: a -> b -> a
+
+    order.clear()
+    src1.set(src1() + 1)
+    assert order == ["a", "b"]
+
+
+def test_effect_scope() -> None:
+    count = Signal(1)
+    spy = MagicMock()
+
+    @effect_scope
+    def scope() -> None:
+        @effect
+        def _() -> None:
+            spy()
+            count()
+
+    assert spy.call_count == 1
+    count.set(2)
+    assert spy.call_count == 2
+
+    scope()
+    count.set(3)
+    assert spy.call_count == 2
+
+
+def test_pause_tracking() -> None:
+    src = Signal(0)
+
+    @computed
+    def c() -> int:
+        with context.pause_tracking():
+            return src()
+
+    assert c() == 0
+
+    src.set(1)
+    assert c() == 0

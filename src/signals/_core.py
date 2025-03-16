@@ -1,78 +1,70 @@
 # Copyright (c) 2024 Trevor Manz
-"""Primitives for transparent reactive programming in Python."""
-
 from __future__ import annotations
 
+import contextlib
+import enum
 import typing
-import weakref
 
-__all__ = ["Signal", "batch", "computed", "effect"]
+from ._system import (
+    Dependency,
+    DependencyWithSubscriber,
+    ReactiveSystem,
+    Subscriber,
+    SubscriberFlags,
+)
 
-Disposer = typing.Callable[[], None]
-Listener = typing.Callable[[], None]
+__all__ = ["Signal", "computed", "context", "effect", "effect_scope"]
 
-# current computed that is running
-CURRENT_COMPUTED: Computed | None = None
-
-# a set of listeners which will be triggered after the batch is complete
-BATCH_PENDING: set[Listener] | None = None
-
-PROCESSING_SIGNALS: set[Signal] = set()
 
 T = typing.TypeVar("T")
 
-
-def batch(fn: typing.Callable[[], T]) -> T:
-    """Combine multiple updates into one "commit" at the end of the provided callback.
-
-    Batches can be nested, and changes are only flushed once the outermost batch
-    callback completes. Accessing a signal that has been modified within a batch
-    will reflect its updated value.
-
-    Parameters
-    ----------
-    fn : Callable[[], T]
-        The callback function to execute within the batch.
-
-    Returns
-    -------
-    T
-        The value returned by the callback function.
-    """
-    global BATCH_PENDING  # noqa: PLW0603
-
-    if BATCH_PENDING is None:
-        listeners = set()
-        old = BATCH_PENDING
-        BATCH_PENDING = listeners
-
-        try:
-            return fn()
-        finally:
-            BATCH_PENDING = old
-            PROCESSING_SIGNALS.clear()
-
-            # trigger any pending listeners
-            for listener in listeners:
-                listener()
-    else:
-        return fn()
+Disposer = typing.Callable[[], None]
 
 
-class Signal(typing.Generic[T]):
-    """Represents a signal that can be subscribed to for changes in value."""
-
-    __slots__ = ["__weakref__", "_children", "_value"]
-
-    _value: T
-
-    # Uses weak references to avoid memory leaks
-    # If the child is not used anywhere, then it can be garbage collected
-    _children: set[weakref.ref[Signal]]
+class Signal(Dependency, typing.Generic[T]):
+    """Represents a time-varying value."""
 
     def __init__(self, value: T) -> None:
-        self._value = value
-        self._children = set()
+        self.current = value
+        self.subs = None
+        self.subs_tail = None
+
+    def peek(self) -> T:
+        """Get the current value of the signal without subscribing to changes.
+
+        Returns
+        -------
+        T
+            The current value of the signal.
+        """
+        return self.current
+
+    def get(self) -> T:
+        """Get the current value of the signal.
+
+        Returns
+        -------
+        T
+            The current value of the signal.
+        """
+        if context.active_sub:
+            system.link(self, context.active_sub)
+        return self.current
+
+    def set(self, update: T) -> None:
+        """Set the value of the signal.
+
+        Parameters
+        ----------
+        update : T
+            The new value of the signal.
+        """
+        if self.current != update:
+            self.current = update
+            if self.subs:
+                system.propagate(self.subs)
+                if not context.batch_depth:
+                    system.process_effect_notifications()
 
     def __call__(self) -> T:
         """Get the current value of the signal.
@@ -87,87 +79,12 @@ class Signal(typing.Generic[T]):
         return self.get()
 
     def __str__(self) -> str:
-        return f"{self()}"
+        return str(self())
 
     def __repr__(self) -> str:
         return f"Signal({self()})"
 
-    # Recurse down all children, marking them as diry and adding
-    # listeners to batch_pending
-    def _wakeup(self) -> None:
-        to_remove = set()
-        for child_ref in self._children:
-            child = child_ref()
-            if child is not None:
-                child._wakeup()  # noqa: SLF001
-            else:
-                to_remove.add(child_ref)
-
-        for child_ref in to_remove:
-            # If the child has been garbage collected, remove it from the set
-            self._children.remove(child_ref)
-
-    def peek(self) -> T:
-        """Get the current value of the signal without subscribing to changes.
-
-        Returns
-        -------
-        T
-            The current value of the signal.
-        """
-        return self._value
-
-    def get(self) -> T:
-        """Get the current value of the signal.
-
-        Returns
-        -------
-        T
-            The current value of the signal.
-        """
-        value = self._value
-        if CURRENT_COMPUTED is not None:
-            # this is ued to detect infinite cycles
-            if BATCH_PENDING is not None:
-                PROCESSING_SIGNALS.add(self)
-
-            # if accessing inside of a computed, add this to the computed's parents
-            CURRENT_COMPUTED._add_dependency(self, value)  # noqa: SLF001
-
-        return value
-
-    def set(self, value: T) -> None:
-        """Set the value of the signal.
-
-        Parameters
-        ----------
-        value : T
-            The new value of the signal.
-
-        Raises
-        ------
-        RuntimeError
-            If a cycle is detected when updating the signal.
-        """
-        if (
-            CURRENT_COMPUTED is not None
-            and BATCH_PENDING is not None
-            and self in PROCESSING_SIGNALS
-        ):
-            msg = "Cycle detected"
-            raise RuntimeError(msg)
-
-        self._value = value
-
-        # If the value is set outside of a batch, this ensures that all of the
-        # children will be fully marked as dirty before triggering any listeners
-        batch(self._wakeup)
-
-    # TODO: Should we have this method?  # noqa: FIX002, TD002, TD003
-    def subscribe(
-        self,
-        fn: typing.Callable[[T], typing.Any],
-    ) -> typing.Callable[[], None]:
+    def subscribe(self, fn: typing.Callable[[T], None]) -> Disposer:
         """Subscribe to changes in the signal.
 
         Parameters
@@ -183,105 +100,33 @@ class Signal(typing.Generic[T]):
         return effect(lambda: fn(self()))
 
 
-class Computed(Signal[T]):
+class UnsetType(enum.Enum):
+    UNSET = "UNSET"
+
+
+class Computed(Dependency, Subscriber, typing.Generic[T]):
     """Represents a signal whose value is derived from other signals."""
 
-    __slots__ = ["_callback", "_dirty", "_first", "_has_error", "_parents", "_weak"]
+    def __init__(self, getter: typing.Callable[[], T]) -> None:
+        self.current: UnsetType | T = UnsetType.UNSET
+        self.subs = None
+        self.subs_tail = None
+        self.deps = None
+        self.deps_tail = None
+        self.flags = SubscriberFlags.Computed | SubscriberFlags.Dirty
+        self.getter = getter
 
-    # Whether this is the first time processing the computed
-    _first: bool
-
-    # Whether any of the computed's parents have changed or not
-    _dirty: bool
-
-    # Whether the callback errored or not
-    _has_error: bool
-
-    # Weakrefs has their own object identity, so we must reuse the same weakref
-    # over and over again
-    _weak: weakref.ref[Signal | Computed]
-
-    # The parent dependencies of this computed.
-    _parents: dict[Signal, typing.Any]
-
-    _callback: typing.Callable[[], T]
-
-    def __init__(self, callback: typing.Callable[[], T]) -> None:
-        super().__init__(typing.cast("T", None))
-        self._first = True
-        self._dirty = True
-        self._has_error = False
-        self._weak = weakref.ref(self)
-        self._parents = {}
-        self._callback = callback
-
-    def _wakeup(self) -> None:
-        """Mark this computed as dirty whenever any of its parents change."""
-        self._dirty = True
-        super()._wakeup()
-
-    def _add_dependency(self, parent: Signal, value: object) -> None:
-        """Add the Signal as a dependency of this computed.
-
-        Called when another Signal's .value is accessed inside of this computed.
-        """
-        self._parents[parent] = value
-        parent._children.add(self._weak)  # noqa: SLF001
-
-    def _remove_dependencies(self) -> None:
-        """Remove all links between this computed and its dependencies."""
-        for parent in self._parents:
-            parent._children.remove(self._weak)  # noqa: SLF001
-
-    def peek(self) -> T:
+    def peek(self) -> T | UnsetType:
         """Get the current value of the computed without subscribing to changes.
+
+        If there are no subscriptions, the intial value is `UnsetType`.
 
         Returns
         -------
-        T
+        T | UnsetType
             The current value of the computed.
         """
-        global CURRENT_COMPUTED  # noqa: PLW0603
-
-        if self._dirty:
-            try:
-                changed = False
-                if self._first:
-                    self._first = False
-                    changed = True
-                else:
-                    for parent, old_value in self._parents.items():
-                        new_value = parent.peek()
-                        if old_value != new_value:
-                            changed = True
-
-                if changed:
-                    self._has_error = False
-                    # Because the dependencies might have changed, we first
-                    # remove all of the old links between this computed and
-                    # its dependencies.
-                    #
-                    # The links will be recreated by the _addDependency method.
-                    self._remove_dependencies()
-
-                    old = CURRENT_COMPUTED
-                    CURRENT_COMPUTED = self
-
-                    try:
-                        self._value = self._callback()
-                    finally:
-                        CURRENT_COMPUTED = old
-            except Exception as e:  # noqa: BLE001
-                self._has_error = True
-                # We reuse the _value slot for the error, instead of using
-                # a separate property
-                self._value = typing.cast("T", e)
-
-        if self._has_error:
-            # We know that the value is an exception
-            raise self._value
-
-        return self._value
+        return self.current
 
     def get(self) -> T:
         """Get the current value of the computed.
@@ -291,120 +136,179 @@ class Computed(Signal[T]):
         T
             The current value of the computed.
         """
-        value = self.peek()
+        if self.flags and (SubscriberFlags.Dirty | SubscriberFlags.PendingComputed):
+            system.process_computed_update(
+                typing.cast("DependencyWithSubscriber", self), self.flags
+            )
+        if context.active_sub:
+            system.link(self, context.active_sub)
+        elif context.active_scope:
+            system.link(self, context.active_scope)
+        return typing.cast("T", self.current)
 
-        if CURRENT_COMPUTED is not None:
-            # If accessing inside of a computed, add this to the computed's parents
-            CURRENT_COMPUTED._add_dependency(self, value)  # noqa: SLF001
+    def __call__(self) -> T:
+        """Get the current value of the computed.
 
-        return value
-
-    def set(self, value: T) -> None:  # noqa: ARG002, PLR6301
-        """Set the value of the computed (not allowed).
-
-        Raises
-        ------
-        AttributeError
-            Computed signals are read-only
+        Returns
+        -------
+        T
+            The current value of the computed.
         """
-        msg = "Computed singals are read-only"
-        raise AttributeError(msg)
+        return self.get()
+
+    def __str__(self) -> str:
+        return str(self())
 
     def __repr__(self) -> str:
         return f"Computed({self()})"
 
 
-def computed(fn: typing.Callable[[], T]) -> Computed[T]:
-    """Create a new signal that is computed based on the values of other signals.
-
-    The returned computed signal is read-only, and its value is automatically
-    updated when any signals accessed from within the callback function change.
-
-    Parameters
-    ----------
-    fn : Callable[[], T]
-        The function to compute the value of the signal.
-
-    Returns
-    -------
-    Computed[T]
-        A new read-only signal.
-    """
-    return Computed(fn)
-
-
-class Effect(Computed[T]):
+class Effect(Dependency, Subscriber, typing.Generic[T]):
     """Represents a side-effect that runs in response to signal changes."""
 
-    __slots__ = ["_listener"]
-
-    _listener: Listener | None
-
     def __init__(self, fn: typing.Callable[[], T]) -> None:
-        self._listener = None
-        super().__init__(fn)
+        self.fn = fn
+        self.subs = None
+        self.subs_tail = None
+        self.deps = None
+        self.deps_tail = None
+        self.flags = SubscriberFlags.Effect
 
     def __repr__(self) -> str:
-        return f"Effect({self()})"
+        return "Effect()"
 
-    def _wakeup(self) -> None:
-        """Mark this effect as dirty whenever any of its parents change.
 
-        Raises
+class EffectScope(Subscriber):
+    """Represents a disposable scope for running effects."""
+
+    def __init__(self) -> None:
+        self.deps = None
+        self.deps_tail = None
+        self.flags = SubscriberFlags.Effect
+
+    def __repr__(self) -> str:
+        return "EffectScope()"
+
+
+class ReactiveContext:
+    """Represents the global context of push-pull based reactivity system."""
+
+    def __init__(self) -> None:
+        self.batch_depth = 0
+        self.pause_stack: list[Subscriber | None] = []
+        self.active_sub: Subscriber | None = None
+        self.active_scope: EffectScope | None = None
+
+    @contextlib.contextmanager
+    def batch(self) -> typing.Generator[None, None, None]:
+        """Combine multiple updates into one "commit".
+
+        Nested batches are supported, and changes take effect immediately, but
+        notifications are suppressed until batching completes.
+
+        Yields
         ------
-        RuntimeError
-            If the batch_pending is invalid.
+        None
         """
-        if BATCH_PENDING is None:
-            msg = "invalid batch_pending"
-            raise RuntimeError(msg)
+        self.batch_depth += 1
+        try:
+            yield
+        finally:
+            self.batch_depth -= 1
+            if self.batch_depth <= 0:
+                system.process_effect_notifications()
 
-        if self._listener is not None:
-            BATCH_PENDING.add(self._listener)
-
-        super()._wakeup()
-
-    def _listen(self, callback: typing.Callable[[T], None]) -> Disposer:
-        old_value = self()
-
-        def listener() -> None:
-            nonlocal old_value
-            new_value = self()
-            if old_value != new_value:
-                old_value = new_value
-                callback(old_value)
-
-        self._listener = listener
-        callback(old_value)
-
-        def dispose() -> None:
-            self._listener = None
-            self._remove_dependencies()
-
-        return dispose
+    @contextlib.contextmanager
+    def pause_tracking(self) -> typing.Generator[None, None, None]:
+        """Temporarily disable tracking, restoring the previous state on exit."""
+        self.pause_stack.append(self.active_sub)
+        self.active_sub = None
+        try:
+            yield
+        finally:
+            self.active_sub = self.pause_stack.pop()
 
 
-def _effect(fn: typing.Callable[[], None]) -> Disposer:
-    """Create an effect to run arbitrary code in response to signal changes.
+def update_computed(computed: Computed) -> bool:
+    prev_sub = context.active_sub
+    context.active_sub = computed
+    system.start_tracking(computed)
+    try:
+        new_value = computed.getter()
+        if computed.current != new_value:
+            computed.current = new_value
+            return True
+        return False
+    finally:
+        context.active_sub = prev_sub
+        system.end_tracking(computed)
 
-    An effect tracks which signals are accessed within the given callback
-    function `fn`, and re-runs the callback when those signals change.
 
-    The callback may return a cleanup function. The cleanup function gets
-    run once, either when the callback is next called or when the effect
-    gets disposed, whichever happens first.
+def run_effect(e: Effect) -> None:
+    prev_sub = context.active_sub
+    context.active_sub = e
+    system.start_tracking(e)
+    try:
+        e.fn()
+    finally:
+        context.active_sub = prev_sub
+        system.end_tracking(e)
 
-    Parameters
-    ----------
-    fn : Callable[[], None]
-        The effect callback.
 
-    Returns
-    -------
-    Callable[[], None]
-        A function for disposing the effect.
-    """
-    return Effect(lambda: batch(fn))._listen(lambda _: None)  # noqa: SLF001
+def run_effect_scope(e: EffectScope, fn: typing.Callable[[], T]) -> None:
+    prev_sub = context.active_scope
+    context.active_scope = e
+    system.start_tracking(e)
+    try:
+        fn()
+    finally:
+        context.active_scope = prev_sub
+        system.end_tracking(e)
+
+
+def notify_effect(e: Effect | EffectScope) -> bool:
+    if isinstance(e, EffectScope):
+        return notify_effect_scope(e)
+
+    flags = e.flags
+    if flags & SubscriberFlags.Dirty or (
+        flags & SubscriberFlags.PendingComputed and system.update_dirty_flag(e, flags)
+    ):
+        run_effect(e)
+    else:
+        system.process_pending_inner_effects(e, e.flags)
+
+    return True
+
+
+def notify_effect_scope(e: EffectScope) -> bool:
+    flags = e.flags
+    if flags & SubscriberFlags.PendingEffect:
+        system.process_pending_inner_effects(e, e.flags)
+        return True
+    return False
+
+
+def create_disposer(sub: Subscriber) -> Disposer:
+    def dispose() -> None:
+        system.start_tracking(sub)
+        system.end_tracking(sub)
+
+    return dispose
+
+
+context = ReactiveContext()
+system = ReactiveSystem(update_computed=update_computed, notify_effect=notify_effect)  # type: ignore  # noqa: PGH003
+
+
+def _effect(fn: typing.Callable[[], T]) -> Disposer:
+    e = Effect(fn)
+    if context.active_sub:
+        system.link(e, context.active_sub)
+    elif context.active_scope:
+        system.link(e, context.active_scope)
+    run_effect(e)
+    return create_disposer(e)
 
 
 @typing.overload
@@ -512,3 +416,55 @@ def on(
         return lambda: func()  # noqa: PLW0108
 
     return decorator
+
+
+def effect_scope(fn: typing.Callable[[], T]) -> Disposer:
+    """Run a function in an isolated effect scope and return a disposer.
+
+    Effects inside the scope track dependencies and react to changes.
+    Calling the disposer stops reactivity.
+
+    Parameters
+    ----------
+    fn : Callable[[], T]
+        A function containing reactive computations.
+
+    Returns
+    -------
+    Disposer
+        A callable that, when invoked, disposes of the effect scope.
+
+    Example
+    -------
+    >>> count = Signal(1)
+    >>> logs = []
+    >>>
+    >>> scope = effect_scope(lambda: effect(lambda: logs.append(count())))
+    >>> count.set(2)
+    >>> assert logs == [1, 2]  # Effect runs on change
+    >>> scope()  # Dispose of the effect scope
+    >>> count.set(3)
+    >>> assert logs == [1, 2]  # No further reactions
+    """
+    e = EffectScope()
+    run_effect_scope(e, fn)
+    return create_disposer(e)
+
+
+def computed(fn: typing.Callable[[], T]) -> Computed[T]:
+    """Create a new signal that is computed based on the values of other signals.
+
+    The returned computed signal is read-only, and its value is automatically
+    updated when any signals accessed from within the callback function change.
+
+    Parameters
+    ----------
+    fn : Callable[[], T]
+        The function to compute the value of the signal.
+
+    Returns
+    -------
+    Computed[T]
+        A new read-only signal.
+    """
+    return Computed(fn)

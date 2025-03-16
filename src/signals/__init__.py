@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from ._core import Signal, batch, computed, effect
+from ._core import Signal, computed, context, effect, effect_scope
 from ._version import __version__
 
 
