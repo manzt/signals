@@ -228,12 +228,14 @@ class Range(Input[float]):
         state = super()._get_anywidget_state(include)
         state["kind"] = "range"
         state["content"] = self.extent
-        state["options"].update({
-            "step": self.step,
-            "placeholder": self.placeholder,
-            "transform": self.transform,
-            "width": self.width,
-        })
+        state["options"].update(
+            {
+                "step": self.step,
+                "placeholder": self.placeholder,
+                "transform": self.transform,
+                "width": self.width,
+            }
+        )
         return state
 
 
@@ -278,9 +280,11 @@ class Radio(Input[T]):
         state = super()._get_anywidget_state(include)
         state["kind"] = "radio"
         state["content"] = self.options
-        state["options"].update({
-            "format": list(map(self.format, self.options)) if self.format else None,
-        })
+        state["options"].update(
+            {
+                "format": list(map(self.format, self.options)) if self.format else None,
+            }
+        )
         return state
 
 

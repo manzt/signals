@@ -207,7 +207,7 @@ class Computed(Signal[T]):
     _callback: typing.Callable[[], T]
 
     def __init__(self, callback: typing.Callable[[], T]) -> None:
-        super().__init__(typing.cast(T, None))
+        super().__init__(typing.cast("T", None))
         self._first = True
         self._dirty = True
         self._has_error = False
@@ -275,7 +275,7 @@ class Computed(Signal[T]):
                 self._has_error = True
                 # We reuse the _value slot for the error, instead of using
                 # a separate property
-                self._value = typing.cast(T, e)
+                self._value = typing.cast("T", e)
 
         if self._has_error:
             # We know that the value is an exception
@@ -457,9 +457,8 @@ def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
 
 
 def effect(*args, **kwargs) -> typing.Callable:
-    """Create an effect to run arbitrary code in response to signal changes."""
     if len(args) == 1 and callable(args[0]):
-        return _effect(args[0])  # noqa: DOC201
+        return _effect(args[0])
 
     deps = args[0] if len(args) == 1 else kwargs.get("deps", [])
     defer = kwargs.get("defer", False)
@@ -471,7 +470,9 @@ def effect(*args, **kwargs) -> typing.Callable:
 
 
 def on(
-    deps: typing.Sequence[Signal], *, defer: bool = False,
+    deps: typing.Sequence[Signal],
+    *,
+    defer: bool = False,
 ) -> typing.Callable[[typing.Callable[..., None]], typing.Callable[[], None]]:
     """Make dependencies for a function explicit.
 
