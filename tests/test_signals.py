@@ -32,7 +32,7 @@ def test_signal_notifies_other_listeners() -> None:
     spy3 = MagicMock(side_effect=s)
 
     effect(spy1)
-    dispose = effect(typing.cast(typing.Callable, spy2))
+    dispose = effect(typing.cast("typing.Callable", spy2))
     effect(spy3)
 
     assert spy1.call_count == 1
@@ -143,7 +143,7 @@ def test_computed_notifies_listeners() -> None:
     c = computed(lambda: a() + b())
 
     spy = MagicMock(side_effect=c)
-    dispose = effect(typing.cast(typing.Callable, spy))
+    dispose = effect(typing.cast("typing.Callable", spy))
     assert spy.call_count == 1
 
     a.set(a() + 1)

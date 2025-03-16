@@ -16,10 +16,10 @@ inputs = ["anywidget>=0.9.0"]
 [dependency-groups]
 dev = [
     "anywidget[dev]>=0.9.13",
-    "jupyterlab>=4.2.5",
+    "jupyterlab>=4.3.6",
     "polars>=1.7.1",
-    "pytest>=8.1.2",
-    "ruff>=0.6.8",
+    "pytest>=8.3.5",
+    "ruff>=0.11.0",
 ]
 
 [tool.ruff.lint]
@@ -27,6 +27,7 @@ preview = true
 pydocstyle = { convention = "numpy" }
 select = ["ALL"]
 isort.required-imports = ["from __future__ import annotations"]
+ignore = ["COM812"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/signals/__init__.py" = ["F401"]
