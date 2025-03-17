@@ -2,10 +2,14 @@
 	"lock": false,
 	"compilerOptions": {
 		"checkJs": true,
-		"allowJs": true,
-		"lib": ["ES2020", "DOM", "DOM.Iterable"]
+		"lib": ["dom", "dom.iterable", "esnext"]
 	},
 	"fmt": {
 		"useTabs": true
+	},
+	"lint": {
+		"rules": {
+			"exclude": ["prefer-const"]
+		}
 	}
 }
