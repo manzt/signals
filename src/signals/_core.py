@@ -13,7 +13,14 @@ from ._system import (
     SubscriberFlags,
 )
 
-__all__ = ["Signal", "computed", "context", "effect", "effect_scope"]
+__all__ = [
+    "Signal",
+    "computed",
+    "context",
+    "create_subscriber",
+    "effect",
+    "effect_scope",
+]
 
 
 T = typing.TypeVar("T")
@@ -481,3 +488,54 @@ def computed(fn: typing.Callable[[], T]) -> Computed[T]:
         A new read-only signal.
     """
     return Computed(fn)
+
+
+def create_subscriber(
+    start: typing.Callable[
+        [typing.Callable[[], None]], typing.Callable[[], None] | None
+    ],
+) -> typing.Callable[[], None]:
+    """Create a subscriber function that manages an observable effect.
+
+    When `update` is called, the effect re-runs.
+    If `start` returns a function, it runs when the effect is destroyed.
+    If `subscribe` is used in multiple effects, `start` is only called once while
+    active, and cleanup runs when all effects are destroyed.
+
+    Parameters
+    ----------
+    start : Callable[[Callable[[], None]], Callable[[], None] | None]
+        A function that starts listening and returns an optional cleanup function.
+
+    Returns
+    -------
+    Callable[[], None]
+        A function to be called inside an effect to track changes.
+    """
+    version = Signal(0)
+    subscribers = 0
+    stop: typing.Callable[[], None] | None = None
+
+    def subscribe() -> None:
+        version.get()
+
+        @effect
+        def _() -> Disposer:
+            nonlocal subscribers, stop
+
+            if subscribers == 0:
+                with context.pause_tracking():
+                    stop = start(lambda *args, **kwargs: version.set(version.get() + 1))  # noqa: ARG005
+
+            subscribers += 1
+
+            def cleanup() -> None:
+                nonlocal subscribers, stop
+                subscribers -= 1
+                if subscribers == 0 and stop:
+                    stop()
+                    stop = None
+
+            return cleanup
+
+    return subscribe
