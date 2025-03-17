@@ -9,7 +9,7 @@ from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
 from IPython.display import DisplayHandle, display
 
-from ._core import Disposer, effect
+from ._core import Disposer, context, effect
 
 if typing.TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell
@@ -70,12 +70,13 @@ def prepare_cell_execution(shell: InteractiveShell, raw_code: str) -> Disposer:
 
     def run_cell() -> None:
         try:
-            result = run_ast_nodes(
-                nodelist=code_ast.body,
-                cell_name=cell_name,
-                user_global_ns=shell.user_global_ns,
-                user_ns=shell.user_ns,
-            )
+            with context.batch():
+                result = run_ast_nodes(
+                    nodelist=code_ast.body,
+                    cell_name=cell_name,
+                    user_global_ns=shell.user_global_ns,
+                    user_ns=shell.user_ns,
+                )
             if "value" in result:
                 dh.update(result["value"])
         except Exception:  # noqa: BLE001
@@ -102,7 +103,8 @@ def prepare_cell_execution_ipywidgets(
 
     @output_widget.capture(clear_output=True, wait=True)
     def run_cell() -> None:
-        shell.run_cell(raw_code)
+        with context.batch():
+            shell.run_cell(raw_code)
 
     cleanup_effect = effect(run_cell)
 
