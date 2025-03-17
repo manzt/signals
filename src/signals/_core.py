@@ -15,11 +15,12 @@ from ._system import (
 
 __all__ = [
     "Signal",
+    "batch",
     "computed",
-    "context",
     "create_subscriber",
     "effect",
     "effect_scope",
+    "untrack",
 ]
 
 
@@ -54,8 +55,8 @@ class Signal(Dependency, typing.Generic[T]):
         T
             The current value of the signal.
         """
-        if context.active_sub:
-            system.link(self, context.active_sub)
+        if CONTEXT.active_sub:
+            SYSTEM.link(self, CONTEXT.active_sub)
         return self.current
 
     def set(self, update: T) -> None:
@@ -69,9 +70,9 @@ class Signal(Dependency, typing.Generic[T]):
         if self.current != update:
             self.current = update
             if self.subs:
-                system.propagate(self.subs)
-                if not context.batch_depth:
-                    system.process_effect_notifications()
+                SYSTEM.propagate(self.subs)
+                if not CONTEXT.batch_depth:
+                    SYSTEM.process_effect_notifications()
 
     def __call__(self) -> T:
         """Get the current value of the signal.
@@ -144,13 +145,13 @@ class Computed(Dependency, Subscriber, typing.Generic[T]):
             The current value of the computed.
         """
         if self.flags and (SubscriberFlags.Dirty | SubscriberFlags.PendingComputed):
-            system.process_computed_update(
+            SYSTEM.process_computed_update(
                 typing.cast("DependencyWithSubscriber", self), self.flags
             )
-        if context.active_sub:
-            system.link(self, context.active_sub)
-        elif context.active_scope:
-            system.link(self, context.active_scope)
+        if CONTEXT.active_sub:
+            SYSTEM.link(self, CONTEXT.active_sub)
+        elif CONTEXT.active_scope:
+            SYSTEM.link(self, CONTEXT.active_scope)
         return typing.cast("T", self.current)
 
     def __call__(self) -> T:
@@ -207,40 +208,11 @@ class ReactiveContext:
         self.active_sub: Subscriber | None = None
         self.active_scope: EffectScope | None = None
 
-    @contextlib.contextmanager
-    def batch(self) -> typing.Generator[None, None, None]:
-        """Combine multiple updates into one "commit".
-
-        Nested batches are supported, and changes take effect immediately, but
-        notifications are suppressed until batching completes.
-
-        Yields
-        ------
-        None
-        """
-        self.batch_depth += 1
-        try:
-            yield
-        finally:
-            self.batch_depth -= 1
-            if self.batch_depth <= 0:
-                system.process_effect_notifications()
-
-    @contextlib.contextmanager
-    def pause_tracking(self) -> typing.Generator[None, None, None]:
-        """Temporarily disable tracking, restoring the previous state on exit."""
-        self.pause_stack.append(self.active_sub)
-        self.active_sub = None
-        try:
-            yield
-        finally:
-            self.active_sub = self.pause_stack.pop()
-
 
 def update_computed(computed: Computed) -> bool:
-    prev_sub = context.active_sub
-    context.active_sub = computed
-    system.start_tracking(computed)
+    prev_sub = CONTEXT.active_sub
+    CONTEXT.active_sub = computed
+    SYSTEM.start_tracking(computed)
     try:
         new_value = computed.getter()
         if computed.current != new_value:
@@ -248,8 +220,8 @@ def update_computed(computed: Computed) -> bool:
             return True
         return False
     finally:
-        context.active_sub = prev_sub
-        system.end_tracking(computed)
+        CONTEXT.active_sub = prev_sub
+        SYSTEM.end_tracking(computed)
 
 
 def run_effect(e: Effect) -> None:
@@ -257,27 +229,27 @@ def run_effect(e: Effect) -> None:
         e.cleanup()
     e.cleanup = None
 
-    prev_sub = context.active_sub
-    context.active_sub = e
-    system.start_tracking(e)
+    prev_sub = CONTEXT.active_sub
+    CONTEXT.active_sub = e
+    SYSTEM.start_tracking(e)
     try:
         result = e.fn()
         if callable(result):
             e.cleanup = result
     finally:
-        context.active_sub = prev_sub
-        system.end_tracking(e)
+        CONTEXT.active_sub = prev_sub
+        SYSTEM.end_tracking(e)
 
 
 def run_effect_scope(e: EffectScope, fn: typing.Callable[[], T]) -> T:
-    prev_sub = context.active_scope
-    context.active_scope = e
-    system.start_tracking(e)
+    prev_sub = CONTEXT.active_scope
+    CONTEXT.active_scope = e
+    SYSTEM.start_tracking(e)
     try:
         return fn()
     finally:
-        context.active_scope = prev_sub
-        system.end_tracking(e)
+        CONTEXT.active_scope = prev_sub
+        SYSTEM.end_tracking(e)
 
 
 def notify_effect(e: Effect | EffectScope) -> bool:
@@ -286,11 +258,11 @@ def notify_effect(e: Effect | EffectScope) -> bool:
 
     flags = e.flags
     if flags & SubscriberFlags.Dirty or (
-        flags & SubscriberFlags.PendingComputed and system.update_dirty_flag(e, flags)
+        flags & SubscriberFlags.PendingComputed and SYSTEM.update_dirty_flag(e, flags)
     ):
         run_effect(e)
     else:
-        system.process_pending_inner_effects(e, e.flags)
+        SYSTEM.process_pending_inner_effects(e, e.flags)
 
     return True
 
@@ -298,7 +270,7 @@ def notify_effect(e: Effect | EffectScope) -> bool:
 def notify_effect_scope(e: EffectScope) -> bool:
     flags = e.flags
     if flags & SubscriberFlags.PendingEffect:
-        system.process_pending_inner_effects(e, e.flags)
+        SYSTEM.process_pending_inner_effects(e, e.flags)
         return True
     return False
 
@@ -307,76 +279,251 @@ def create_disposer(sub: Effect | EffectScope) -> Disposer:
     def dispose() -> None:
         if isinstance(sub, Effect) and sub.cleanup:
             sub.cleanup()
-        system.start_tracking(sub)
-        system.end_tracking(sub)
+        SYSTEM.start_tracking(sub)
+        SYSTEM.end_tracking(sub)
 
     return dispose
 
 
-context = ReactiveContext()
-system = ReactiveSystem(update_computed=update_computed, notify_effect=notify_effect)  # type: ignore  # noqa: PGH003
+@contextlib.contextmanager
+def _batch() -> typing.Generator[None, None, None]:
+    """Combine multiple updates into one "commit"."""
+    CONTEXT.batch_depth += 1
+    try:
+        yield
+    finally:
+        CONTEXT.batch_depth -= 1
+        if CONTEXT.batch_depth <= 0:
+            SYSTEM.process_effect_notifications()
+
+
+@contextlib.contextmanager
+def _untrack() -> typing.Generator[None, None, None]:
+    """Temporarily disable tracking, restoring the previous state on exit."""
+    CONTEXT.pause_stack.append(CONTEXT.active_sub)
+    CONTEXT.active_sub = None
+    try:
+        yield
+    finally:
+        CONTEXT.active_sub = CONTEXT.pause_stack.pop()
 
 
 def _effect(fn: typing.Callable[[], Disposer | None]) -> Disposer:
     e = Effect(fn)
-    if context.active_sub:
-        system.link(e, context.active_sub)
-    elif context.active_scope:
-        system.link(e, context.active_scope)
+    if CONTEXT.active_sub:
+        SYSTEM.link(e, CONTEXT.active_sub)
+    elif CONTEXT.active_scope:
+        SYSTEM.link(e, CONTEXT.active_scope)
     run_effect(e)
     return create_disposer(e)
 
 
+CONTEXT = ReactiveContext()
+SYSTEM = ReactiveSystem(update_computed=update_computed, notify_effect=notify_effect)  # type: ignore  # noqa: PGH003
+
+
+# Public API
+
+
 @typing.overload
-def effect(  # noqa: D418
+def batch() -> contextlib._GeneratorContextManager[None, None, None]:
+    pass
+
+
+@typing.overload
+def batch(
+    fn: typing.Callable[[], T],
+) -> T:
+    pass
+
+
+def batch(
+    fn: typing.Callable[[], T] | None = None,
+) -> contextlib._GeneratorContextManager[None, None, None] | T:
+    """Combine multiple updates into one "commit".
+
+    Ensures multiple updates are grouped together, reducing redundant
+    notifications until batching completes.
+
+    Can be used either as a context manager or as a function wrapper.
+
+    Nested batches are supported. Changes take effect immediately, but
+    notifications are suppressed until all active batch contexts exit.
+
+    Parameters
+    ----------
+    fn : typing.Callable[[], None], optional
+        A function to be executed within the batch.
+
+    Returns
+    -------
+    None | contextlib._GeneratorContextManager[None, None, None]
+        - Returns a context manager when called without arguments.
+        - Returns `None` when used as a function wrapper.
+
+    Examples
+    --------
+    Using `batch` as a context manager:
+
+    >>> with batch():
+    >>>     update_1()
+    >>>     update_2()  # Notifications are suppressed until the block exits.
+
+    Using `batch` as a function wrapper:
+
+    >>> batch(lambda: update_1())  # Runs `update_1()` within a batch.
+
+    """
+    if fn is None:
+        return _batch()
+    with _batch():
+        return fn()
+
+
+foo = batch(lambda: 10)
+
+
+@typing.overload
+def untrack() -> contextlib._GeneratorContextManager[None, None, None]:
+    pass
+
+
+@typing.overload
+def untrack(
+    fn: typing.Callable[[], T],
+) -> T:
+    pass
+
+
+def untrack(
+    fn: typing.Callable[[], T] | None = None,
+) -> contextlib._GeneratorContextManager[None, None, None] | T:
+    """Ignore tracking any of the dependencies in the executing code block.
+
+    When used inside a `computed` or `effect`, any state read inside `fn`
+    will NOT be treated as a dependency.
+
+    Parameters
+    ----------
+    fn : typing.Callable[[], None], optional
+        A function to be executed with tracking disabled.
+
+    Returns
+    -------
+    None | contextlib._GeneratorContextManager[None, None, None]
+        - Returns a context manager when called without arguments.
+        - Returns `None` when used as a function wrapper.
+    """
+    if fn is None:
+        return _untrack()
+    with _untrack():
+        return fn()
+
+
+@typing.overload
+def effect(
     deps: typing.Sequence[Signal],
     *,
     defer: bool = False,
 ) -> typing.Callable[[typing.Callable[..., Disposer | None]], Disposer]:
-    """Create an effect with explicit dependencies.
-
-    An effect is a side-effect that runs in response to signal changes.
-
-    Parameters
-    ----------
-    deps : Sequence[Signal]
-        The signals that the effect depends on.
-
-    defer : bool, optional
-        Defer the effect until the next change, rather than running immediately.
-        By default, False.
-
-    Returns
-    -------
-    Callable[[Callable[..., None]], Disposer]
-        A decorator function for creating effects.
-    """
+    pass
 
 
 @typing.overload
-def effect(fn: typing.Callable[[], Disposer | None], /) -> Disposer:  # noqa: D418
-    """Create an effect to run arbitrary code in response to signal changes.
+def effect(fn: typing.Callable[[], Disposer | None], /) -> Disposer:
+    pass
 
-    An effect tracks which signals are accessed within the given callback
-    function `fn`, and re-runs the callback when those signals change.
 
-    The callback may return a cleanup function. The cleanup function gets
+def effect(*args, **kwargs) -> typing.Callable:
+    """Create a reactive effect.
+
+    Effects are functions that run whenever state updates. When `signals`
+    runs an effect function, it tracks which pieces of state (and derived state)
+    are accessed (unless accessed inside `untrack`), and re-runs the function
+    when that state later changes.
+
+    Effects run **immediately** in order to track dependencies. To instead opt
+    in to running the computation only on change, specify explicit dependencies
+    with `effect(deps=[...], defer=True)` (See examples).
+
+    The `fn` may return a cleanup function. The cleanup function gets
     run once, either when the callback is next called or when the effect
     gets disposed, whichever happens first.
 
     Parameters
     ----------
-    fn : Callable[[], None]
-        The effect callback.
+    fn : Callable[[], None | () -> None]
+        The function to run in a tracking scope. It MAY return a "cleanup" function,
+        which run once, either when `fn` is next called or when the effect gets
+        disposed, whichever happens first.
+
+    deps: Sequence[Signal]
+        A list of signals for explicit dependency tracking.
+
+    defer : bool, optional
+        If `True`, defers execution until the first change. Defaults to `False`.
+        Must be used with `deps`.
 
     Returns
     -------
-    Callable[[], None]
-        A function for disposing the effect.
+        - A disposer function (`effect(fn)`).
+        - A decorator when using explicit dependencies (`effect(deps=[...])`).
+
+    Examples
+    --------
+    Basic Usage:
+
+    >>> a = Signal(10)
+    >>> effect(lambda: print(a()))
+    10
+    >>> a.set(20)
+    20
+
+    As a Decorator:
+
+    >>> a = Signal(10)
+    >>> b = Signal(3)
+    >>> @effect
+    >>> def _():
+    >>>     print(a() + b())
+    13
+    >>> a.set(20)
+    23
+
+    Explicit Dependencies (Immediate):
+
+    >>> a = Signal("a")
+    >>> b = Signal("b")
+    >>> @effect(deps=[a, b])
+    >>> def _(a_val: str, b_val: str):
+    >>>     print(f"{a_val} {b_val}")
+    "a b"
+    >>> a.set("aa")
+    "aa b"
+
+    Explicit Dependencies (Lazy):
+
+    >>> a = Signal("a")
+    >>> @effect(deps=[a], defer=True)
+    >>> def _(a_val: str):
+    >>>     print(a_val)
+    >>> a.set("aa")
+    "aa"
+
+    With Cleanup:
+
+    >>> a = Signal(10)
+    >>> def fn():
+    >>>     print(a())
+    >>>     return lambda: print("Cleanup")
+    >>> dispose = effect(fn)
+    10
+    >>> a.set(20)
+    Cleanup
+    20
+    >>> dispose()  # Manually dispose
+    >>> a.set(42)  # No output (effect is disposed)
     """
-
-
-def effect(*args, **kwargs) -> typing.Callable:
     if len(args) == 1 and callable(args[0]):
         return _effect(args[0])  # type: ignore  # noqa: PGH003
 
@@ -398,6 +545,8 @@ def on(
 ]:
     """Make dependencies for a function explicit.
 
+    This is an internal utility. Please use `signals.effect` overload instead.
+
     Parameters
     ----------
     deps : Sequence[Signal]
@@ -411,6 +560,15 @@ def on(
     -------
     Callable[[Callable[..., None]], Callable[[], None]]
         A callback function that can be registered as an effect.
+
+    Examples
+    --------
+    >>> a = Signal("a")
+    >>> @effect
+    >>> @on(deps=(a,))
+    >>> def _(a: str):
+    >>>     print(a.upper())
+    "A"
     """
 
     def decorator(
@@ -439,10 +597,10 @@ def on(
 
 
 def effect_scope(fn: typing.Callable[[], T]) -> Disposer:
-    """Run a function in an isolated effect scope and return a disposer.
+    """Create an isolated effect scope.
 
-    Effects inside the scope track dependencies and react to changes.
-    Calling the disposer stops reactivity.
+    Returns a stop function that disposes of all effects registered in the scope.
+    Useful for managing the lifecycle of reactive computations.
 
     Parameters
     ----------
@@ -451,18 +609,18 @@ def effect_scope(fn: typing.Callable[[], T]) -> Disposer:
 
     Returns
     -------
-    Disposer
-        A callable that, when invoked, disposes of the effect scope.
+    Callable[[], None]
+        A function that stops the effect scope and prevents further reactivity.
 
     Example
     -------
     >>> count = Signal(1)
     >>> logs = []
     >>>
-    >>> scope = effect_scope(lambda: effect(lambda: logs.append(count())))
+    >>> stop = effect_scope(lambda: effect(lambda: logs.append(count())))
     >>> count.set(2)
     >>> assert logs == [1, 2]  # Effect runs on change
-    >>> scope()  # Dispose of the effect scope
+    >>> stop()  # Stop the effect scope
     >>> count.set(3)
     >>> assert logs == [1, 2]  # No further reactions
     """
@@ -472,20 +630,37 @@ def effect_scope(fn: typing.Callable[[], T]) -> Disposer:
 
 
 def computed(fn: typing.Callable[[], T]) -> Computed[T]:
-    """Create a new signal that is computed based on the values of other signals.
+    """Derive a read-only signal from others.
 
-    The returned computed signal is read-only, and its value is automatically
-    updated when any signals accessed from within the callback function change.
+    The computed value is determined by `fn`, which accesses other signals.
+    It updates whenever those signals change.
+
+    Computeds are **lazy**. They only recalculate when accessed. Peeking
+    their value (e.g., `x.peek()`) returns `UnsetType` if not previously
+    read (e.g., `x()`).
 
     Parameters
     ----------
     fn : Callable[[], T]
-        The function to compute the value of the signal.
+        A function that computes the value based on other signals.
 
     Returns
     -------
     Computed[T]
         A new read-only signal.
+
+    Example
+    -------
+    >>> a = Signal(2)
+    >>> b = Signal(3)
+    >>> product = computed(lambda: a() * b())
+
+    >>> product()
+    6
+
+    >>> a.set(4)
+    >>> product()
+    12
     """
     return Computed(fn)
 
@@ -499,8 +674,11 @@ def create_subscriber(
 
     When `update` is called, the effect re-runs.
     If `start` returns a function, it runs when the effect is destroyed.
-    If `subscribe` is used in multiple effects, `start` is only called once while
-    active, and cleanup runs when all effects are destroyed.
+    If `subscribe` is used in multiple effects, `start` is only called **once**
+    while active, and cleanup runs **once** after all effects are destroyed.
+
+    This function can be useful to hook other event-based APIs, such as
+    `traitlets` (see example), into the signals reactivity system.
 
     Parameters
     ----------
@@ -511,7 +689,32 @@ def create_subscriber(
     -------
     Callable[[], None]
         A function to be called inside an effect to track changes.
-    """
+
+    Examples
+    --------
+    Integrating with `traitlets`
+
+    >>> import traitlets
+
+    >>> class Foo(traitlets.HasTraits):
+    >>>     value = traitlets.Int(0)
+
+    >>> foo = Foo()
+
+    >>> def start(update):
+    >>>     foo.observe(update, names="value") # Subscribe to changes
+    >>>     return lambda: foo.unobserve(update, names="value") # Cleanup when unsubscribed
+
+    >>> subscribe = create_subscriber(start)
+
+    >>> @effect
+    >>> def _():
+    >>>     subscribe()  # Subscribe to `foo.value` changes
+    >>>     print(f"Current value is: {foo.value}")
+
+    >>> foo.value = 42
+    "Current value is: 42"
+    """  # noqa: E501
     version = Signal(0)
     subscribers = 0
     stop: typing.Callable[[], None] | None = None
@@ -524,8 +727,11 @@ def create_subscriber(
             nonlocal subscribers, stop
 
             if subscribers == 0:
-                with context.pause_tracking():
-                    stop = start(lambda *args, **kwargs: version.set(version.get() + 1))  # noqa: ARG005
+                stop = untrack(
+                    lambda: start(
+                        lambda *_args, **_kwargs: version.set(version.get() + 1)
+                    )
+                )
 
             subscribers += 1
 
