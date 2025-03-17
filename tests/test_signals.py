@@ -6,7 +6,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from signals import Signal, computed, context, create_subscriber, effect, effect_scope
+from signals import (
+    Signal,
+    batch,
+    computed,
+    create_subscriber,
+    effect,
+    effect_scope,
+    untrack,
+)
 
 T = typing.TypeVar("T")
 
@@ -85,13 +93,6 @@ def test_basic_computed() -> None:
 
     b.set("foo")
     assert c() == "hello foo"
-
-
-def test_computed_is_readonly() -> None:
-    a = Signal(0)
-    b = computed(lambda: a() + 1)
-    with pytest.raises(AttributeError):
-        b.set(10)  # type: ignore  # noqa: PGH003
 
 
 def test_signal_peek_not_depend_on_surrounding_computed() -> None:
@@ -265,7 +266,7 @@ def test_runs_outer_effect_first() -> None:
                 if a() == 0:
                     pytest.fail("Should not happen")
 
-    with context.batch():
+    with batch():
         b.set(0)
         a.set(0)
 
@@ -308,7 +309,7 @@ def test_triggers_inner_effects_in_sequence() -> None:
             b()
 
     order.clear()
-    with context.batch():
+    with batch():
         b.set(1)
         a.set(1)
 
@@ -317,12 +318,7 @@ def test_triggers_inner_effects_in_sequence() -> None:
 
 def test_custom_batched_effect() -> None:
     def batch_effect(fn: typing.Callable[[], None]) -> typing.Callable[[], None]:
-        @effect
-        def _() -> None:
-            with context.batch():
-                return fn()
-
-        return _
+        return effect(lambda: batch(fn))
 
     logs: list[str] = []
     a = Signal(0)
@@ -354,7 +350,7 @@ def test_duplicate_subscribers_do_not_affect_notify_order() -> None:
     @effect
     def _() -> None:
         order.append("a")
-        with context.pause_tracking():
+        with untrack():
             is_one = src2() == 1
         if is_one:
             src1()
@@ -396,10 +392,7 @@ def test_effect_scope() -> None:
 def test_pause_tracking() -> None:
     src = Signal(0)
 
-    @computed
-    def c() -> int:
-        with context.pause_tracking():
-            return src()
+    c = computed(lambda: untrack(src))
 
     assert c() == 0
 

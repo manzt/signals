@@ -9,7 +9,7 @@ from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
 from IPython.display import DisplayHandle, display
 
-from ._core import Disposer, context, effect
+from ._core import Disposer, batch, effect
 
 if typing.TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell
@@ -70,20 +70,19 @@ def prepare_cell_execution(shell: InteractiveShell, raw_code: str) -> Disposer:
 
     def run_cell() -> None:
         try:
-            with context.batch():
-                result = run_ast_nodes(
-                    nodelist=code_ast.body,
-                    cell_name=cell_name,
-                    user_global_ns=shell.user_global_ns,
-                    user_ns=shell.user_ns,
-                )
+            result = run_ast_nodes(
+                nodelist=code_ast.body,
+                cell_name=cell_name,
+                user_global_ns=shell.user_global_ns,
+                user_ns=shell.user_ns,
+            )
             if "value" in result:
                 dh.update(result["value"])
         except Exception:  # noqa: BLE001
             shell.showtraceback()
 
     dh.display(None)  # create the display
-    return effect(run_cell)
+    return effect(lambda: batch(run_cell))
 
 
 def prepare_cell_execution_ipywidgets(
@@ -103,10 +102,9 @@ def prepare_cell_execution_ipywidgets(
 
     @output_widget.capture(clear_output=True, wait=True)
     def run_cell() -> None:
-        with context.batch():
-            shell.run_cell(raw_code)
+        shell.run_cell(raw_code)
 
-    cleanup_effect = effect(run_cell)
+    cleanup_effect = effect(lambda: batch(run_cell))
 
     def cleanup() -> None:
         cleanup_effect()
