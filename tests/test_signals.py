@@ -91,7 +91,7 @@ def test_computed_is_readonly() -> None:
     a = Signal(0)
     b = computed(lambda: a() + 1)
     with pytest.raises(AttributeError):
-        b.set(10)
+        b.set(10)  # type: ignore  # noqa: PGH003
 
 
 def test_signal_peek_not_depend_on_surrounding_computed() -> None:
@@ -316,7 +316,7 @@ def test_triggers_inner_effects_in_sequence() -> None:
 
 
 def test_custom_batched_effect() -> None:
-    def batch_effect(fn: typing.Callable[[], None]) -> None:
+    def batch_effect(fn: typing.Callable[[], None]) -> typing.Callable[[], None]:
         @effect
         def _() -> None:
             with context.batch():
@@ -405,3 +405,19 @@ def test_pause_tracking() -> None:
 
     src.set(1)
     assert c() == 0
+
+
+def test_effects_can_have_cleanup() -> None:
+    a = Signal(0)
+    spy = MagicMock()
+
+    @effect
+    def _() -> typing.Callable[[], None]:
+        a()
+        return spy
+
+    assert spy.call_count == 0
+
+    a.set(10)
+    a.set(13)
+    assert spy.call_count == 2

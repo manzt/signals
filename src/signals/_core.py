@@ -163,11 +163,12 @@ class Computed(Dependency, Subscriber, typing.Generic[T]):
         return f"Computed({self()})"
 
 
-class Effect(Dependency, Subscriber, typing.Generic[T]):
+class Effect(Dependency, Subscriber):
     """Represents a side-effect that runs in response to signal changes."""
 
-    def __init__(self, fn: typing.Callable[[], T]) -> None:
+    def __init__(self, fn: typing.Callable[[], Disposer | None]) -> None:
         self.fn = fn
+        self.cleanup: Disposer | None = None
         self.subs = None
         self.subs_tail = None
         self.deps = None
@@ -245,22 +246,28 @@ def update_computed(computed: Computed) -> bool:
 
 
 def run_effect(e: Effect) -> None:
+    if e.cleanup:
+        e.cleanup()
+    e.cleanup = None
+
     prev_sub = context.active_sub
     context.active_sub = e
     system.start_tracking(e)
     try:
-        e.fn()
+        result = e.fn()
+        if callable(result):
+            e.cleanup = result
     finally:
         context.active_sub = prev_sub
         system.end_tracking(e)
 
 
-def run_effect_scope(e: EffectScope, fn: typing.Callable[[], T]) -> None:
+def run_effect_scope(e: EffectScope, fn: typing.Callable[[], T]) -> T:
     prev_sub = context.active_scope
     context.active_scope = e
     system.start_tracking(e)
     try:
-        fn()
+        return fn()
     finally:
         context.active_scope = prev_sub
         system.end_tracking(e)
@@ -289,8 +296,10 @@ def notify_effect_scope(e: EffectScope) -> bool:
     return False
 
 
-def create_disposer(sub: Subscriber) -> Disposer:
+def create_disposer(sub: Effect | EffectScope) -> Disposer:
     def dispose() -> None:
+        if isinstance(sub, Effect) and sub.cleanup:
+            sub.cleanup()
         system.start_tracking(sub)
         system.end_tracking(sub)
 
@@ -301,7 +310,7 @@ context = ReactiveContext()
 system = ReactiveSystem(update_computed=update_computed, notify_effect=notify_effect)  # type: ignore  # noqa: PGH003
 
 
-def _effect(fn: typing.Callable[[], T]) -> Disposer:
+def _effect(fn: typing.Callable[[], Disposer | None]) -> Disposer:
     e = Effect(fn)
     if context.active_sub:
         system.link(e, context.active_sub)
@@ -316,7 +325,7 @@ def effect(  # noqa: D418
     deps: typing.Sequence[Signal],
     *,
     defer: bool = False,
-) -> typing.Callable[[typing.Callable[..., None]], Disposer]:
+) -> typing.Callable[[typing.Callable[..., Disposer | None]], Disposer]:
     """Create an effect with explicit dependencies.
 
     An effect is a side-effect that runs in response to signal changes.
@@ -338,7 +347,7 @@ def effect(  # noqa: D418
 
 
 @typing.overload
-def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
+def effect(fn: typing.Callable[[], Disposer | None], /) -> Disposer:  # noqa: D418
     """Create an effect to run arbitrary code in response to signal changes.
 
     An effect tracks which signals are accessed within the given callback
@@ -362,12 +371,12 @@ def effect(fn: typing.Callable[[], None], /) -> Disposer:  # noqa: D418
 
 def effect(*args, **kwargs) -> typing.Callable:
     if len(args) == 1 and callable(args[0]):
-        return _effect(args[0])
+        return _effect(args[0])  # type: ignore  # noqa: PGH003
 
     deps = args[0] if len(args) == 1 else kwargs.get("deps", [])
     defer = kwargs.get("defer", False)
 
-    def wrap(fn: typing.Callable[[], None]) -> Disposer:
+    def wrap(fn: typing.Callable[[], Disposer | None]) -> Disposer:
         return _effect(on(deps=deps, defer=defer)(fn))
 
     return wrap
@@ -377,7 +386,9 @@ def on(
     deps: typing.Sequence[Signal],
     *,
     defer: bool = False,
-) -> typing.Callable[[typing.Callable[..., None]], typing.Callable[[], None]]:
+) -> typing.Callable[
+    [typing.Callable[..., Disposer | None]], typing.Callable[[], Disposer | None]
+]:
     """Make dependencies for a function explicit.
 
     Parameters
@@ -395,9 +406,11 @@ def on(
         A callback function that can be registered as an effect.
     """
 
-    def decorator(fn: typing.Callable[..., None]) -> typing.Callable[[], None]:
+    def decorator(
+        fn: typing.Callable[..., Disposer | None],
+    ) -> typing.Callable[[], Disposer | None]:
         # The main effect function that will be run.
-        def main() -> None:
+        def main() -> Disposer | None:
             return fn(*(dep() for dep in deps))
 
         func = main
