@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from signals import Signal, computed, context, effect, effect_scope
+from signals import Signal, computed, context, create_subscriber, effect, effect_scope
 
 T = typing.TypeVar("T")
 
@@ -421,3 +421,31 @@ def test_effects_can_have_cleanup() -> None:
     a.set(10)
     a.set(13)
     assert spy.call_count == 2
+
+
+def test_create_subscriber() -> None:
+    import traitlets  # noqa: PLC0415
+
+    class Foo(traitlets.HasTraits):
+        value = traitlets.Int(0)
+
+    foo = Foo()
+
+    def start(update: typing.Callable[[], None]) -> typing.Callable[[], None]:
+        foo.observe(update, names="value")
+        return lambda: foo.unobserve(update, names="value")
+
+    subscribe = create_subscriber(start)
+
+    history = []
+
+    @effect
+    def _() -> None:
+        subscribe()
+        history.append(foo.value)
+
+    foo.value = 10
+    foo.value = 20
+    foo.value = 30
+
+    assert history == [0, 10, 20, 30]
