@@ -65,26 +65,29 @@ a.set(1)
 
 ## what
 
-`signals` is an implementation of transparent reactive programming (TRP) for Python.
+`signals` is an implementation of transparent reactive programming (TRP) for
+Python.
 
 TRP is a declarative programming paradigm for expressing _relationships_ between
 values that vary over time. These time-varying values are known as _signals_.
 Whenever a signal changes, the system automatically updates all dependents.
 
 Spreadsheets are the classic example of TRP: cells linked by formulas update
-automatically when values change. The system discovers dependencies by
-observing data access, dynamically constructing a dependency graph.
+automatically when values change. The system discovers dependencies by observing
+data access, dynamically constructing a dependency graph.
 
 The key features of TRP include:
 
 - **declarative**: the programmer specifies relationships between values
-- **transparent**: the system (not the programmer) automatically tracks dependencies
-- **efficient**: the system performs only the necessary computations to ensure relationships hold over time
+- **transparent**: the system (not the programmer) automatically tracks
+  dependencies
+- **efficient**: the system performs only the necessary computations to ensure
+  relationships hold over time
 
 ## why
 
-TL;DR - TRP is a natural fit for interactive computing but has so far lacked
-the right interface in popular tools to go mainstream. You can read more of my
+TL;DR - TRP is a natural fit for interactive computing but has so far lacked the
+right interface in popular tools to go mainstream. You can read more of my
 [unfinished thoughts](./notes.md) on this topic.
 
 ## development
