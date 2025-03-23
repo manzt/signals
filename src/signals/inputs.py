@@ -13,7 +13,10 @@ import weakref
 from ._core import Signal
 
 try:
-    from anywidget._descriptor import MimeBundleDescriptor, _comm_for  # noqa: PLC2701
+    from anywidget._descriptor import (
+        MimeBundleDescriptor,  # noqa: PLC2701
+        _get_or_create_comm,  # noqa: PLC2701
+    )
 except ImportError as e:
     msg = (
         "anywidget is required to use the signals.inputs. "
@@ -35,7 +38,9 @@ def _signal_comm(
     if signal in COMMS:
         return COMMS[signal]
 
-    comm = _comm_for(signal)
+    comm = _get_or_create_comm(
+        signal, get_state=lambda: {"value": serialize(signal.peek())}
+    )
 
     def send_state(update: T) -> None:
         state = {"value": serialize(update)}
