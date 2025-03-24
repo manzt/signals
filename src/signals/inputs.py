@@ -28,7 +28,12 @@ if typing.TYPE_CHECKING:
     from comm.base_comm import BaseComm
 
 __all__ = [
+    "Color",
+    "Form",
+    "Radio",
     "Range",
+    "Select",
+    "Text",
     "Toggle",
 ]
 

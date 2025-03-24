@@ -2,6 +2,33 @@ import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
 /** @import { RenderProps, InitializeProps, AnyModel } from 'npm:@anywidget/types' */
 
 /**
+ * @template {Array<unknown>} Args
+ * @param {(...args: Args) => void} fn
+ * @param {number} delay
+ * @returns {(...args: Args) => void}
+ */
+function debounce(fn, delay) {
+	/** @type {ReturnType<typeof setTimeout>} */
+	let timeoutId;
+	return function (...args) {
+		clearTimeout(timeoutId);
+		timeoutId = setTimeout(() => fn.apply(null, args), delay);
+	};
+}
+
+/**
+ * Make an assertion.
+ *
+ * @param {unknown} expression - The expression to test.
+ * @param {string=} msg - The optional message to display if the assertion fails.
+ * @returns {asserts expression}
+ * @throws an {@link Error} if `expression` is not truthy.
+ */
+function assert(expression, msg = "") {
+	if (!expression) throw new Error(msg);
+}
+
+/**
  * @param {InputKind} kind
  * @param {Record<string, any>} options
  */
@@ -64,13 +91,12 @@ function omitNullish(obj) {
  * @returns {Promise<InputSource<AnyModel<{value: unknown}>>>}
  */
 async function resolveInputSource(model, source) {
-	let { kind, content, options, model: signal } = source;
 	return {
-		kind,
-		content,
-		options: omitNullish(resolveOptions(kind, options)),
+		kind: source.kind,
+		content: source.content,
+		options: omitNullish(resolveOptions(source.kind, source.options)),
 		model: await model.widget_manager.get_model(
-			signal.slice("signal:".length),
+			source.model.slice("signal:".length),
 		),
 	};
 }
@@ -86,10 +112,12 @@ async function resolveInputSource(model, source) {
  */
 function createConnectedInput(source, { signal, equals }) {
 	let { kind, content, options, model } = source;
-	console.log({kind, content, options, model})
+
+	let Input = Inputs[kind];
+	assert(Input, `\`Inputs.${kind}\` does not exist.`);
 
 	/** @type {HTMLFormElement} */
-	let input = content ? Inputs[kind](content, options) : Inputs[kind](options);
+	let input = content ? Input(content, options) : Input(options);
 
 	if (signal.aborted) {
 		return input;
@@ -108,12 +136,14 @@ function createConnectedInput(source, { signal, equals }) {
 		model.off("change:value", update);
 	});
 
+	const sync = debounce(model.save_changes.bind(model), 300);
+
 	input.addEventListener(
 		"input",
 		(event) => {
 			event.stopPropagation();
 			model.set("value", input.value);
-			model.save_changes();
+			sync();
 		},
 		{ signal },
 	);
