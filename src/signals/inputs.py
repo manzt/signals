@@ -161,7 +161,7 @@ class Input(typing.Generic[T]):
 
     def _get_anywidget_state(self, include: set[str] | None) -> dict:  # noqa: ARG002
         return {
-            "signal": f"signal:{_signal_comm(self._value).comm_id}",
+            "model": f"signal:{_signal_comm(self._value).comm_id}",
             "options": {
                 "label": self.label,
                 "value": self._value.peek(),

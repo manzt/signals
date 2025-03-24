@@ -1,18 +1,20 @@
 import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
-/** @import { RenderProps, InitializeProps, AnyModel } from 'npm:@anywidget/types' */
 
 /**
- * @template {Array<unknown>} Args
- * @param {(...args: Args) => void} fn
+ * @param {() => void} fn
  * @param {number} delay
- * @returns {(...args: Args) => void}
+ * @returns {() => void}
  */
-function debounce(fn, delay) {
-	/** @type {ReturnType<typeof setTimeout>} */
-	let timeoutId;
-	return function (...args) {
-		clearTimeout(timeoutId);
-		timeoutId = setTimeout(() => fn.apply(null, args), delay);
+function trailingThrottle(fn, delay) {
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let timeoutId = undefined;
+	return function () {
+		if (!timeoutId) {
+			timeoutId = setTimeout(() => {
+				timeoutId = undefined;
+				fn();
+			}, delay);
+		}
 	};
 }
 
@@ -75,7 +77,7 @@ function omitNullish(obj) {
 
 /**
  * @template T
- * @typedef {AnyModel<{value: T}>} ValueModel
+ * @typedef {import("npm:@anywidget/types").AnyModel<{value: T}>} ValueModel
  */
 
 /** @typedef {"range" | "radio" | "select" | "checkbox" | "toggle"} InputKind */
@@ -86,9 +88,10 @@ function omitNullish(obj) {
  */
 
 /**
- * @param {AnyModel} model
+ * @template T
+ * @param {import("npm:@anywidget/types").AnyModel} model
  * @param {InputSource<string>} source
- * @returns {Promise<InputSource<AnyModel<{value: unknown}>>>}
+ * @returns {Promise<InputSource<ValueModel<T>>>}
  */
 async function resolveInputSource(model, source) {
 	return {
@@ -136,7 +139,7 @@ function createConnectedInput(source, { signal, equals }) {
 		model.off("change:value", update);
 	});
 
-	const sync = debounce(model.save_changes.bind(model), 300);
+	const sync = trailingThrottle(model.save_changes.bind(model), 20);
 
 	input.addEventListener(
 		"input",
@@ -164,57 +167,55 @@ function createConnectedInput(source, { signal, equals }) {
 	return input;
 }
 
-export default () => {
-	/** @type {Array<InputSource<ValueModel<unknown>>>} */
-	let sources;
-	return {
-		/** @param {InitializeProps} props */
-		async initialize({ model }) {
-			/** @type {Array<InputSource<string>>} */
-			let entries = model.get("kind") === "form" ? model.get("inputs") : [{
-				kind: model.get("kind"),
-				content: model.get("content"),
-				options: model.get("options"),
-				model: model.get("signal"),
-			}];
-			sources = await Promise.all(
+export default {
+	/** @type {import("npm:@anywidget/types").Render} */
+	async render({ model, el }) {
+		/** @type {Array<InputSource<string>>} */
+		let entries = model.get("kind") === "form" ? model.get("inputs") : [{
+			kind: model.get("kind"),
+			content: model.get("content"),
+			options: model.get("options"),
+			model: model.get("model"),
+		}];
+
+		let controller = new AbortController();
+		let root = document.createElement("div");
+		{
+			el.appendChild(root);
+			controller.signal.addEventListener("abort", () => root.remove());
+		}
+
+		let shadow = root.attachShadow({ mode: "closed" });
+
+		// styles
+		{
+			// TODO: bundle these styles into the widget
+			let href =
+				"https://raw.githubusercontent.com/observablehq/inputs/main/src/style.css";
+			let sheet = new CSSStyleSheet();
+			sheet.replaceSync(
+				await fetch(href).then((res) => res.text()),
+			);
+			shadow.adoptedStyleSheets.push(sheet);
+		}
+
+		// inputs
+		{
+			let inputSources = await Promise.all(
 				entries.map((entry) => resolveInputSource(model, entry)),
 			);
-		},
-		/** @param {RenderProps} props */
-		render({ el }) {
-			let controller = new AbortController();
-			let root = document.createElement("div");
-
-			{
-				el.appendChild(root);
-				controller.signal.addEventListener("abort", () => root.remove());
-			}
-
-			let shadow = root.attachShadow({ mode: "closed" });
-
-			{
-				// TODO: bundle these styles into the widget
-				shadow.appendChild(
-					Object.assign(document.createElement("link"), {
-						rel: "stylesheet",
-						href:
-							"https://raw.githubusercontent.com/observablehq/inputs/main/src/style.css",
-					}),
-				);
-				shadow.appendChild(
-					Inputs.form(
-						sources.map((source) =>
-							createConnectedInput(source, {
-								equals: Object.is,
-								signal: controller.signal,
-							})
-						),
+			shadow.appendChild(
+				Inputs.form(
+					inputSources.map((input) =>
+						createConnectedInput(input, {
+							equals: Object.is,
+							signal: controller.signal,
+						})
 					),
-				);
-			}
+				),
+			);
+		}
 
-			return () => controller.abort();
-		},
-	};
+		return () => controller.abort();
+	},
 };
