@@ -48,7 +48,10 @@ def _signal_comm(
     if signal in COMMS:
         return COMMS[signal]
 
-    comm = open_comm(initial_state={"value": serialize(signal.peek())})
+    comm = open_comm(
+        # need anywidget comms need `_esm` to resolve
+        initial_state={"_esm": "export default {}", "value": serialize(signal.peek())}
+    )
 
     def send_state_update(update: T) -> None:
         comm.send(
