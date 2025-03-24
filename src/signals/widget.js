@@ -1,31 +1,5 @@
-// @deno-types="npm:@observablehq/inputs@0.10.6";
 import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
-// @deno-types="npm:@preact/signals-core@1.6.0"
-import * as Signals from "https://esm.sh/@preact/signals-core@1.6.0";
-
-/**
- * @template T
- * @param {import("npm:@anywidget/types").AnyModel} model
- * @param {string} name
- */
-function createSignal(model, name) {
-	const value = Signals.signal(/** @type {T} */ (model.get(name)));
-	model.on(`change:${name}`, () => {
-		value.value = model.get(name);
-	});
-	return {
-		get() {
-			return value.value;
-		},
-		set(/** @type {T} */ update) {
-			if (typeof update === "function") {
-				update = update(model.get(name));
-			}
-			model.set(name, update);
-			model.save_changes();
-		},
-	};
-}
+/** @import { RenderProps, InitializeProps, AnyModel } from 'npm:@anywidget/types' */
 
 /**
  * @param {InputKind} kind
@@ -74,41 +48,45 @@ function omitNullish(obj) {
 
 /**
  * @template T
- * @typedef {{ get(): T, set(value: T): void }} WebSignal
+ * @typedef {AnyModel<{value: T}>} ValueModel
  */
+
 /** @typedef {"range" | "radio" | "select" | "checkbox" | "toggle"} InputKind */
+
 /**
- * @template SignalT
- * @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, signal: SignalT }} InputSource
+ * @template T
+ * @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, model: T }} InputSource
  */
 
 /**
- * @param {import("npm:@anywidget/types").AnyModel} model
- * @param {InputSource<string>} inputSource
- * @returns {Promise<InputSource<WebSignal<unknown>>>}
+ * @param {AnyModel} model
+ * @param {InputSource<string>} source
+ * @returns {Promise<InputSource<AnyModel<{value: unknown}>>>}
  */
-async function resolveInputSource(model, inputSource) {
-	let { kind, content, options, signal } = inputSource;
-	let modelId = signal.slice("signal:".length);
-	let signalModel = await model.widget_manager.get_model(modelId);
+async function resolveInputSource(model, source) {
+	let { kind, content, options, model: signal } = source;
 	return {
 		kind,
 		content,
 		options: omitNullish(resolveOptions(kind, options)),
-		signal: createSignal(signalModel, "value"),
+		model: await model.widget_manager.get_model(
+			signal.slice("signal:".length),
+		),
 	};
 }
 
 /**
  * @template T
- * @param {InputSource<WebSignal<unknown>>} source
+ * @param {InputSource<ValueModel<T>>} source
  * @param {Object} options
  * @param {AbortSignal} options.signal
+ * @param {(a: T, b: T) => boolean} options.equals
  *
  * @returns {HTMLFormElement}
  */
-function createConnectedInput(source, { signal }) {
-	let { kind, content, options, signal: state } = source;
+function createConnectedInput(source, { signal, equals }) {
+	let { kind, content, options, model } = source;
+	console.log({kind, content, options, model})
 
 	/** @type {HTMLFormElement} */
 	let input = content ? Inputs[kind](content, options) : Inputs[kind](options);
@@ -117,12 +95,28 @@ function createConnectedInput(source, { signal }) {
 		return input;
 	}
 
-	let dispose = Signals.effect(() => {
-		input.value = state.get();
-		input.dispatchEvent(new Event("input", { bubbles: true }));
+	function update() {
+		let current = model.get("value");
+		if (!equals(input.value, current)) {
+			input.value = current;
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		}
+	}
+
+	model.on("change:value", update);
+	signal.addEventListener("abort", () => {
+		model.off("change:value", update);
 	});
 
-	signal.addEventListener("abort", () => dispose());
+	input.addEventListener(
+		"input",
+		(event) => {
+			event.stopPropagation();
+			model.set("value", input.value);
+			model.save_changes();
+		},
+		{ signal },
+	);
 
 	/**
 	 * JupyterLab tries to soak up all keyboard events, so we need to stop them
@@ -136,36 +130,28 @@ function createConnectedInput(source, { signal }) {
 		);
 	}
 
-	input.addEventListener(
-		"input",
-		(event) => {
-			event.stopPropagation();
-			state.set(input.value);
-		},
-		{ signal },
-	);
-
+	update();
 	return input;
 }
 
 export default () => {
-	/** @type {Array<InputSource<WebSignal<unknown>>>} */
+	/** @type {Array<InputSource<ValueModel<unknown>>>} */
 	let sources;
 	return {
-		/** @type {import("npm:@anywidget/types").Initialize} */
+		/** @param {InitializeProps} props */
 		async initialize({ model }) {
 			/** @type {Array<InputSource<string>>} */
 			let entries = model.get("kind") === "form" ? model.get("inputs") : [{
 				kind: model.get("kind"),
 				content: model.get("content"),
 				options: model.get("options"),
-				signal: model.get("signal"),
+				model: model.get("signal"),
 			}];
 			sources = await Promise.all(
 				entries.map((entry) => resolveInputSource(model, entry)),
 			);
 		},
-		/** @type {import("npm:@anywidget/types").Render} */
+		/** @param {RenderProps} props */
 		render({ el }) {
 			let controller = new AbortController();
 			let root = document.createElement("div");
@@ -189,7 +175,10 @@ export default () => {
 				shadow.appendChild(
 					Inputs.form(
 						sources.map((source) =>
-							createConnectedInput(source, { signal: controller.signal })
+							createConnectedInput(source, {
+								equals: Object.is,
+								signal: controller.signal,
+							})
 						),
 					),
 				);

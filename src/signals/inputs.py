@@ -15,7 +15,7 @@ from ._core import Signal
 try:
     from anywidget._descriptor import (
         MimeBundleDescriptor,  # noqa: PLC2701
-        _get_or_create_comm,  # noqa: PLC2701
+        open_comm,  # noqa: PLC2701
     )
 except ImportError as e:
     msg = (
@@ -26,6 +26,11 @@ except ImportError as e:
 
 if typing.TYPE_CHECKING:
     from comm.base_comm import BaseComm
+
+__all__ = [
+    "Range",
+    "Toggle",
+]
 
 COMMS = weakref.WeakKeyDictionary()
 
@@ -38,30 +43,35 @@ def _signal_comm(
     if signal in COMMS:
         return COMMS[signal]
 
-    comm = _get_or_create_comm(
-        signal, get_state=lambda: {"value": serialize(signal.peek())}
-    )
+    comm = open_comm(initial_state={"value": serialize(signal.peek())})
 
-    def send_state(update: T) -> None:
-        state = {"value": serialize(update)}
-        data = {"method": "update", "state": state, "buffer_paths": []}
-        comm.send(data=data, buffers=[])
+    def send_state_update(update: T) -> None:
+        comm.send(
+            data={
+                "method": "update",
+                "state": {"value": serialize(update)},
+                "buffer_paths": [],
+            },
+            buffers=[],
+        )
 
-    def handle_msg(msg: dict[str, typing.Any]) -> None:
-        data = msg["content"]["data"]
+    def handle_comm_message(message: dict[str, typing.Any]) -> None:
+        data = message["content"]["data"]
         if data["method"] == "update":
             if "state" in data:
-                signal.set(deserialize(data["state"]["value"]))
+                value = deserialize(data["state"]["value"])
+                signal.set(value)
         elif data["method"] == "request_state":
-            send_state(signal.peek())
+            send_state_update(signal.peek())
         else:
-            msg = f"Unrecognized method: {data['method']}."
+            msg = f"Unrecognized comm message. Method: {data['method']}."
             raise ValueError(msg)
 
-    comm.on_msg(handle_msg)
-    send_state(signal.peek())
-    signal.subscribe(send_state)
+    # deferred because we already sent initial state when opening comm
+    dispose = signal.subscribe(send_state_update, defer=True)
+    comm.on_msg(handle_comm_message)
 
+    weakref.finalize(signal, dispose)
     COMMS[signal] = comm
     return comm
 
