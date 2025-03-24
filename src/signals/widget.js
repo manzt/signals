@@ -1,30 +1,33 @@
-// @deno-types="npm:@observablehq/inputs@0.10.6";
 import * as Inputs from "https://esm.sh/@observablehq/inputs@0.10.6";
-// @deno-types="npm:@preact/signals-core@1.6.0"
-import * as Signals from "https://esm.sh/@preact/signals-core@1.6.0";
 
 /**
- * @template T
- * @param {import("npm:@anywidget/types").AnyModel} model
- * @param {string} name
+ * @param {() => void} fn
+ * @param {number} delay
+ * @returns {() => void}
  */
-function createSignal(model, name) {
-	const value = Signals.signal(/** @type {T} */ (model.get(name)));
-	model.on(`change:${name}`, () => {
-		value.value = model.get(name);
-	});
-	return {
-		get() {
-			return value.value;
-		},
-		set(/** @type {T} */ update) {
-			if (typeof update === "function") {
-				update = update(model.get(name));
-			}
-			model.set(name, update);
-			model.save_changes();
-		},
+function trailingThrottle(fn, delay) {
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let timeoutId = undefined;
+	return function () {
+		if (!timeoutId) {
+			timeoutId = setTimeout(() => {
+				timeoutId = undefined;
+				fn();
+			}, delay);
+		}
 	};
+}
+
+/**
+ * Make an assertion.
+ *
+ * @param {unknown} expression - The expression to test.
+ * @param {string=} msg - The optional message to display if the assertion fails.
+ * @returns {asserts expression}
+ * @throws an {@link Error} if `expression` is not truthy.
+ */
+function assert(expression, msg = "") {
+	if (!expression) throw new Error(msg);
 }
 
 /**
@@ -74,55 +77,79 @@ function omitNullish(obj) {
 
 /**
  * @template T
- * @typedef {{ get(): T, set(value: T): void }} WebSignal
+ * @typedef {import("npm:@anywidget/types").AnyModel<{value: T}>} ValueModel
  */
+
 /** @typedef {"range" | "radio" | "select" | "checkbox" | "toggle"} InputKind */
+
 /**
- * @template SignalT
- * @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, signal: SignalT }} InputSource
+ * @template T
+ * @typedef {{ kind: InputKind, content?: any, options: Record<string, any>, model: T }} InputSource
  */
 
 /**
+ * @template T
  * @param {import("npm:@anywidget/types").AnyModel} model
- * @param {InputSource<string>} inputSource
- * @returns {Promise<InputSource<WebSignal<unknown>>>}
+ * @param {InputSource<string>} source
+ * @returns {Promise<InputSource<ValueModel<T>>>}
  */
-async function resolveInputSource(model, inputSource) {
-	let { kind, content, options, signal } = inputSource;
-	let modelId = signal.slice("signal:".length);
-	let signalModel = await model.widget_manager.get_model(modelId);
+async function resolveInputSource(model, source) {
 	return {
-		kind,
-		content,
-		options: omitNullish(resolveOptions(kind, options)),
-		signal: createSignal(signalModel, "value"),
+		kind: source.kind,
+		content: source.content,
+		options: omitNullish(resolveOptions(source.kind, source.options)),
+		model: await model.widget_manager.get_model(
+			source.model.slice("signal:".length),
+		),
 	};
 }
 
 /**
  * @template T
- * @param {InputSource<WebSignal<unknown>>} source
+ * @param {InputSource<ValueModel<T>>} source
  * @param {Object} options
  * @param {AbortSignal} options.signal
+ * @param {(a: T, b: T) => boolean} options.equals
  *
  * @returns {HTMLFormElement}
  */
-function createConnectedInput(source, { signal }) {
-	let { kind, content, options, signal: state } = source;
+function createConnectedInput(source, { signal, equals }) {
+	let { kind, content, options, model } = source;
+
+	let Input = Inputs[kind];
+	assert(Input, `\`Inputs.${kind}\` does not exist.`);
 
 	/** @type {HTMLFormElement} */
-	let input = content ? Inputs[kind](content, options) : Inputs[kind](options);
+	let input = content ? Input(content, options) : Input(options);
 
 	if (signal.aborted) {
 		return input;
 	}
 
-	let dispose = Signals.effect(() => {
-		input.value = state.get();
-		input.dispatchEvent(new Event("input", { bubbles: true }));
+	function update() {
+		let current = model.get("value");
+		if (!equals(input.value, current)) {
+			input.value = current;
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		}
+	}
+
+	model.on("change:value", update);
+	signal.addEventListener("abort", () => {
+		model.off("change:value", update);
 	});
 
-	signal.addEventListener("abort", () => dispose());
+	const sync = trailingThrottle(model.save_changes.bind(model), 20);
+
+	input.addEventListener(
+		"input",
+		(event) => {
+			event.stopPropagation();
+			model.set("value", input.value);
+			sync();
+		},
+		{ signal },
+	);
 
 	/**
 	 * JupyterLab tries to soak up all keyboard events, so we need to stop them
@@ -136,66 +163,59 @@ function createConnectedInput(source, { signal }) {
 		);
 	}
 
-	input.addEventListener(
-		"input",
-		(event) => {
-			event.stopPropagation();
-			state.set(input.value);
-		},
-		{ signal },
-	);
-
+	update();
 	return input;
 }
 
-export default () => {
-	/** @type {Array<InputSource<WebSignal<unknown>>>} */
-	let sources;
-	return {
-		/** @type {import("npm:@anywidget/types").Initialize} */
-		async initialize({ model }) {
-			/** @type {Array<InputSource<string>>} */
-			let entries = model.get("kind") === "form" ? model.get("inputs") : [{
-				kind: model.get("kind"),
-				content: model.get("content"),
-				options: model.get("options"),
-				signal: model.get("signal"),
-			}];
-			sources = await Promise.all(
+export default {
+	/** @type {import("npm:@anywidget/types").Render} */
+	async render({ model, el }) {
+		/** @type {Array<InputSource<string>>} */
+		let entries = model.get("kind") === "form" ? model.get("inputs") : [{
+			kind: model.get("kind"),
+			content: model.get("content"),
+			options: model.get("options"),
+			model: model.get("model"),
+		}];
+
+		let controller = new AbortController();
+		let root = document.createElement("div");
+		{
+			el.appendChild(root);
+			controller.signal.addEventListener("abort", () => root.remove());
+		}
+
+		let shadow = root.attachShadow({ mode: "closed" });
+
+		// styles
+		{
+			// TODO: bundle these styles into the widget
+			let href =
+				"https://raw.githubusercontent.com/observablehq/inputs/main/src/style.css";
+			let sheet = new CSSStyleSheet();
+			sheet.replaceSync(
+				await fetch(href).then((res) => res.text()),
+			);
+			shadow.adoptedStyleSheets.push(sheet);
+		}
+
+		// inputs
+		{
+			let inputSources = await Promise.all(
 				entries.map((entry) => resolveInputSource(model, entry)),
 			);
-		},
-		/** @type {import("npm:@anywidget/types").Render} */
-		render({ el }) {
-			let controller = new AbortController();
-			let root = document.createElement("div");
-
-			{
-				el.appendChild(root);
-				controller.signal.addEventListener("abort", () => root.remove());
-			}
-
-			let shadow = root.attachShadow({ mode: "closed" });
-
-			{
-				// TODO: bundle these styles into the widget
-				shadow.appendChild(
-					Object.assign(document.createElement("link"), {
-						rel: "stylesheet",
-						href:
-							"https://raw.githubusercontent.com/observablehq/inputs/main/src/style.css",
-					}),
-				);
-				shadow.appendChild(
-					Inputs.form(
-						sources.map((source) =>
-							createConnectedInput(source, { signal: controller.signal })
-						),
+			shadow.appendChild(
+				Inputs.form(
+					inputSources.map((input) =>
+						createConnectedInput(input, {
+							equals: Object.is,
+							signal: controller.signal,
+						})
 					),
-				);
-			}
+				),
+			);
+		}
 
-			return () => controller.abort();
-		},
-	};
+		return () => controller.abort();
+	},
 };

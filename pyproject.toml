@@ -40,3 +40,4 @@ ignore = ["COM812"]
     "PLR2004", # Magic value used in comparison
     "INP001",  # Implicit package
 ]
+"*.ipynb" = ["CPY001", "N812", "N813"]

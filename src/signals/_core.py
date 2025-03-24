@@ -92,20 +92,24 @@ class Signal(Dependency, typing.Generic[T]):
     def __repr__(self) -> str:
         return f"Signal({self()})"
 
-    def subscribe(self, fn: typing.Callable[[T], None]) -> Disposer:
+    def subscribe(
+        self, fn: typing.Callable[[T], None], *, defer: bool = False
+    ) -> Disposer:
         """Subscribe to changes in the signal.
 
         Parameters
         ----------
         fn : Callable[[T], None]
             The callback function to run when the signal changes.
+        defer : bool, optional
+            If `True`, defers execution until the first change. Defaults to `False`.
 
         Returns
         -------
         Callable[[], None]
             A function for unsubscribing from the signal.
         """
-        return effect(lambda: fn(self()))
+        return effect(deps=(self,), defer=defer)(fn)
 
 
 class UnsetType(enum.Enum):
