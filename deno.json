@@ -5,7 +5,8 @@
 		"lib": ["dom", "dom.iterable", "esnext"]
 	},
 	"fmt": {
-		"useTabs": true
+		"useTabs": true,
+		"exclude": ["*.ipynb"]
 	},
 	"lint": {
 		"rules": {
