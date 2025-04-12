@@ -1,7 +1,6 @@
 # signals
 
-primitives for transparent reactive programming in python
-
+blah
 ## install
 
 ```python
