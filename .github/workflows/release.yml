@@ -31,7 +31,3 @@ jobs:
         with:
           skip-existing: true
           verbose: true
-
-      - run: deno run -A npm:changelogithub@0.13
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
