@@ -442,3 +442,102 @@ def test_create_subscriber() -> None:
     foo.value = 30
 
     assert history == [0, 10, 20, 30]
+
+
+def test_signal_custom_equality() -> None:
+    spy = MagicMock()
+    s = Signal(1.0, equals=lambda a, b: abs(a - b) < 0.1)
+
+    @effect
+    def _() -> None:
+        spy(s())
+
+    assert spy.call_count == 1
+
+    s.set(1.05)
+    assert spy.call_count == 1
+
+    s.set(1.2)
+    assert spy.call_count == 2
+
+
+def test_signal_always_update() -> None:
+    spy = MagicMock()
+    s = Signal(42, equals=lambda _a, _b: False)
+
+    @effect
+    def _() -> None:
+        spy(s())
+
+    assert spy.call_count == 1
+
+    s.set(42)
+    assert spy.call_count == 2
+
+    s.set(42)
+    assert spy.call_count == 3
+
+
+def test_signal_custom_object_equality() -> None:
+    class Point:  # noqa: B903
+        def __init__(self, x: float, y: float) -> None:
+            self.x = x
+            self.y = y
+
+    def point_equals(a: Point, b: Point) -> bool:
+        return a.x == b.x and a.y == b.y
+
+    spy = MagicMock()
+    p = Signal(Point(1, 2), equals=point_equals)
+
+    @effect
+    def _() -> None:
+        spy(p().x, p().y)
+
+    assert spy.call_count == 1
+
+    p.set(Point(1, 2))
+    assert spy.call_count == 1
+
+    p.set(Point(1, 3))
+    assert spy.call_count == 2
+
+
+def test_computed_custom_equality() -> None:
+    a = Signal(1.0)
+    b = Signal(2.0)
+
+    spy = MagicMock()
+
+    c = computed(lambda: a() + b(), equals=lambda x, y: abs(x - y) < 0.1)
+
+    @effect
+    def _() -> None:
+        spy(c())
+
+    assert spy.call_count == 1
+    spy.assert_called_with(3.0)
+
+    a.set(1.05)  # c = 3.05, within 0.1 of 3.0
+    assert spy.call_count == 1
+
+    a.set(1.2)  # c = 3.2, outside tolerance
+    assert spy.call_count == 2
+    spy.assert_called_with(3.2)
+
+
+def test_computed_always_update() -> None:
+    counter = Signal(0)
+    spy = MagicMock()
+
+    c = computed(lambda: counter() or 42, equals=lambda _a, _b: False)
+
+    @effect
+    def _() -> None:
+        c()
+        spy()
+
+    assert spy.call_count == 1
+
+    counter.set(1)
+    assert spy.call_count == 2

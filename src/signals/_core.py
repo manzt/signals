@@ -32,8 +32,11 @@ Disposer = typing.Callable[[], None]
 class Signal(Dependency, typing.Generic[T]):
     """Represents a time-varying value."""
 
-    def __init__(self, value: T) -> None:
+    def __init__(
+        self, value: T, *, equals: typing.Callable[[T, T], bool] | None = None
+    ) -> None:
         self.current = value
+        self.equals = equals
         self.subs = None
         self.subs_tail = None
 
@@ -67,7 +70,12 @@ class Signal(Dependency, typing.Generic[T]):
         update : T
             The new value of the signal.
         """
-        if self.current != update:
+        if self.equals:
+            is_equal = self.equals(self.current, update)
+        else:
+            is_equal = self.current == update
+
+        if not is_equal:
             self.current = update
             if self.subs:
                 SYSTEM.propagate(self.subs)
@@ -119,8 +127,14 @@ class UnsetType(enum.Enum):
 class Computed(Dependency, Subscriber, typing.Generic[T]):
     """Represents a signal whose value is derived from other signals."""
 
-    def __init__(self, getter: typing.Callable[[], T]) -> None:
+    def __init__(
+        self,
+        getter: typing.Callable[[], T],
+        *,
+        equals: typing.Callable[[T, T], bool] | None = None,
+    ) -> None:
         self.current: UnsetType | T = UnsetType.UNSET
+        self.equals = equals
         self.subs = None
         self.subs_tail = None
         self.deps = None
@@ -219,7 +233,17 @@ def update_computed(computed: Computed) -> bool:
     SYSTEM.start_tracking(computed)
     try:
         new_value = computed.getter()
-        if computed.current != new_value:
+        # Handle UnsetType for initial computation
+        if isinstance(computed.current, UnsetType):
+            computed.current = new_value
+            return True
+
+        if computed.equals:
+            is_equal = computed.equals(computed.current, new_value)
+        else:
+            is_equal = computed.current == new_value
+
+        if not is_equal:
             computed.current = new_value
             return True
         return False
@@ -633,7 +657,9 @@ def effect_scope(fn: typing.Callable[[], T]) -> Disposer:
     return create_disposer(e)
 
 
-def computed(fn: typing.Callable[[], T]) -> Computed[T]:
+def computed(
+    fn: typing.Callable[[], T], *, equals: typing.Callable[[T, T], bool] | None = None
+) -> Computed[T]:
     """Derive a read-only signal from others.
 
     The computed value is determined by `fn`, which accesses other signals.
@@ -647,6 +673,9 @@ def computed(fn: typing.Callable[[], T]) -> Computed[T]:
     ----------
     fn : Callable[[], T]
         A function that computes the value based on other signals.
+    equals : Callable[[T, T], bool] | None, optional
+        Custom equality function to determine if the computed value has changed.
+        If None, uses standard equality (!=).
 
     Returns
     -------
@@ -666,7 +695,7 @@ def computed(fn: typing.Callable[[], T]) -> Computed[T]:
     >>> product()
     12
     """
-    return Computed(fn)
+    return Computed(fn, equals=equals)
 
 
 def create_subscriber(
