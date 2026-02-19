@@ -10,7 +10,7 @@
 	},
 	"lint": {
 		"rules": {
-			"exclude": ["prefer-const"]
+			"exclude": ["prefer-const", "no-import-prefix"]
 		}
 	}
 }

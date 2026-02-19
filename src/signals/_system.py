@@ -434,7 +434,7 @@ class ReactiveSystem:
                     dep_subs = dep.subs
                     if dep_subs and dep_subs.next_sub:
                         dep_subs.prev_sub = link
-                    link = cast("Link", dep.deps)
+                    link: Link = dep.deps  # ty:ignore[unresolved-attribute]
                     stack += 1
                     continue
 
@@ -446,7 +446,7 @@ class ReactiveSystem:
                 sub = link.sub
                 while stack:
                     stack -= 1
-                    sub_subs = cast("Link", sub.subs)
+                    sub_subs: Link = sub.subs  # ty:ignore[unresolved-attribute]
 
                     if dirty:
                         if self.update_computed(cast("DependencyWithSubscriber", sub)):

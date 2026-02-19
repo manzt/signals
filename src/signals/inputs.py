@@ -13,9 +13,9 @@ import weakref
 from ._core import Signal
 
 try:
-    from anywidget._descriptor import (
-        MimeBundleDescriptor,  # noqa: PLC2701
-        open_comm,  # noqa: PLC2701
+    from anywidget._descriptor import (  # noqa: PLC2701
+        MimeBundleDescriptor,
+        open_comm,
     )
 except ImportError as e:
     msg = (
@@ -162,7 +162,7 @@ class Input(typing.Generic[T]):
         """
         return self._value.peek()
 
-    def _get_anywidget_state(self, include: set[str] | None) -> dict:  # noqa: ARG002
+    def _get_anywidget_state(self, include: typing.Set[str] | None) -> dict:  # noqa: ARG002, UP006
         return {
             "model": f"signal:{_signal_comm(self._value).comm_id}",
             "options": {
@@ -227,7 +227,8 @@ class Range(Input[float]):
         self,
         extent: tuple[float, float],
         *,
-        value: float | Signal[float] | None = None,
+        # Signal[Any] because Signal is invariant, so Signal[int] !<: Signal[float]
+        value: float | Signal[typing.Any] | None = None,
         step: float | None = None,
         placeholder: str | None = None,
         transform: typing.Literal["linear", "log", "sqrt"] | None = None,
@@ -281,7 +282,7 @@ class Radio(Input[T]):
         self,
         options: list[T] | dict[str, T],
         *,
-        value: T | Signal[T] = None,
+        value: T | Signal[T] | None = None,
         label: str | None = None,
         format: typing.Callable[[T], str] | None = None,  # noqa: A002
         disabled: bool | Signal[bool] = False,

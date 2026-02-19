@@ -553,7 +553,7 @@ def effect(*args, **kwargs) -> typing.Callable:
     >>> a.set(42)  # No output (effect is disposed)
     """
     if len(args) == 1 and callable(args[0]):
-        return _effect(args[0])  # type: ignore  # noqa: PGH003
+        return _effect(args[0])
 
     deps = args[0] if len(args) == 1 else kwargs.get("deps", [])
     defer = kwargs.get("defer", False)
