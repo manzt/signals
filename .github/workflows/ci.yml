@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           pyproject-file: "pyproject.toml"
 
@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           pyproject-file: "pyproject.toml"
       - run: uv run pytest
@@ -44,6 +44,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          pyproject-file: "pyproject.toml"
+
+      - run: uv run ty check
+
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x

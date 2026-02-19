@@ -15,7 +15,7 @@ from ._core import (
 from ._version import __version__
 
 
-def load_ipython_extension(ipython) -> None:  # noqa: ANN001
+def load_ipython_extension(ipython) -> None:  # noqa: ANN001, RUF067
     """Load the IPython extension.
 
     `%load_ext signals` will load the extension and enable the `%%effect` cell magic.
