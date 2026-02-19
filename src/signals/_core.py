@@ -162,7 +162,7 @@ class Computed(Dependency, Subscriber, typing.Generic[T]):
         T
             The current value of the computed.
         """
-        if self.flags and (SubscriberFlags.Dirty | SubscriberFlags.PendingComputed):
+        if self.flags & (SubscriberFlags.Dirty | SubscriberFlags.PendingComputed):
             SYSTEM.process_computed_update(
                 typing.cast("DependencyWithSubscriber", self), self.flags
             )
@@ -227,11 +227,20 @@ class ReactiveContext:
         self.active_scope: EffectScope | None = None
 
 
-def update_computed(computed: Computed) -> bool:
+@contextlib.contextmanager
+def _tracking(sub: Subscriber) -> typing.Generator[None, None, None]:
     prev_sub = CONTEXT.active_sub
-    CONTEXT.active_sub = computed
-    SYSTEM.start_tracking(computed)
+    CONTEXT.active_sub = sub
+    SYSTEM.start_tracking(sub)
     try:
+        yield
+    finally:
+        CONTEXT.active_sub = prev_sub
+        SYSTEM.end_tracking(sub)
+
+
+def update_computed(computed: Computed) -> bool:
+    with _tracking(computed):
         new_value = computed.getter()
         # Handle UnsetType for initial computation
         if isinstance(computed.current, UnsetType):
@@ -247,9 +256,6 @@ def update_computed(computed: Computed) -> bool:
             computed.current = new_value
             return True
         return False
-    finally:
-        CONTEXT.active_sub = prev_sub
-        SYSTEM.end_tracking(computed)
 
 
 def run_effect(e: Effect) -> None:
@@ -257,16 +263,10 @@ def run_effect(e: Effect) -> None:
         e.cleanup()
     e.cleanup = None
 
-    prev_sub = CONTEXT.active_sub
-    CONTEXT.active_sub = e
-    SYSTEM.start_tracking(e)
-    try:
+    with _tracking(e):
         result = e.fn()
         if callable(result):
             e.cleanup = result
-    finally:
-        CONTEXT.active_sub = prev_sub
-        SYSTEM.end_tracking(e)
 
 
 def run_effect_scope(e: EffectScope, fn: typing.Callable[[], T]) -> T:
@@ -406,9 +406,6 @@ def batch(
         return _batch()
     with _batch():
         return fn()
-
-
-foo = batch(lambda: 10)
 
 
 @typing.overload

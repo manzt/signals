@@ -1,9 +1,9 @@
 # Copyright (c) 2024 Trevor Manz
 from __future__ import annotations
 
+import dataclasses
 import enum
 import typing
-from typing import cast
 
 
 class SubscriberFlags(enum.IntFlag):
@@ -18,20 +18,13 @@ class SubscriberFlags(enum.IntFlag):
     Propagated = Dirty | PendingComputed | PendingEffect
 
 
-class Link:  # noqa: B903
-    def __init__(
-        self,
-        dep: Dependency | DependencyWithSubscriber,
-        sub: Subscriber | DependencyWithSubscriber,
-        prev_sub: Link | None,
-        next_sub: Link | None,
-        next_dep: Link | None,
-    ) -> None:
-        self.dep = dep
-        self.sub = sub
-        self.prev_sub = prev_sub
-        self.next_sub = next_sub
-        self.next_dep = next_dep
+@dataclasses.dataclass(slots=True)
+class Link:
+    dep: Dependency | DependencyWithSubscriber
+    sub: Subscriber | DependencyWithSubscriber
+    prev_sub: Link | None
+    next_sub: Link | None
+    next_dep: Link | None
 
 
 class Dependency(typing.Protocol):
@@ -46,6 +39,12 @@ class Subscriber(typing.Protocol):
 
 
 class DependencyWithSubscriber(Dependency, Subscriber): ...
+
+
+def _is_dep_sub(
+    x: Dependency | Subscriber,
+) -> typing.TypeGuard[DependencyWithSubscriber]:
+    return hasattr(x, "subs") and hasattr(x, "flags")
 
 
 class UpdateComputed(typing.Protocol):
@@ -140,7 +139,15 @@ class ReactiveSystem:
 
         return link_new_dep(dep, sub, next_dep, current_dep)
 
-    def propagate(self, link: Link) -> None:  # noqa: C901, PLR0912
+    def _queue_effect(self, sub: Subscriber) -> None:
+        """Add an effect subscriber to the notification queue."""
+        if self.queued_effects_tail:
+            self.queued_effects_tail.deps_tail.next_dep = sub.deps  # type: ignore[union-attr]
+        else:
+            self.queued_effects = sub
+        self.queued_effects_tail = sub
+
+    def propagate(self, link: Link) -> None:  # noqa: C901, PLR0912, PLR0915
         """Traverse and mark subscribers starting from the provided link.
 
         Sets flags (e.g., Dirty, PendingComputed, PendingEffect) on each subscriber
@@ -160,22 +167,58 @@ class ReactiveSystem:
         while True:
             sub = link.sub
             sub_flags = sub.flags
-            # fmt: off
-            if (  # noqa: PLR0916
-                not (sub_flags & (SubscriberFlags.Tracking | SubscriberFlags.Recursed | SubscriberFlags.Propagated))  # noqa: E501
-                and set_flags(sub, sub_flags | target_flag | SubscriberFlags.Notified)
-            ) or (
-                (sub_flags & SubscriberFlags.Recursed)
-                and not (sub_flags & SubscriberFlags.Tracking)
-                and set_flags(sub, (sub_flags & ~SubscriberFlags.Recursed) | target_flag | SubscriberFlags.Notified)  # noqa: E501
-            ) or (
-                not (sub_flags & SubscriberFlags.Propagated)
-                and is_valid_link(link, sub)
-                and set_flags(sub, sub_flags | SubscriberFlags.Recursed | target_flag | SubscriberFlags.Notified)  # noqa: E501
-                and hasattr(sub, "subs")
+            should_descend = False
+
+            if not (
+                sub_flags
+                & (
+                    SubscriberFlags.Tracking
+                    | SubscriberFlags.Recursed
+                    | SubscriberFlags.Propagated
+                )
             ):
-                # fmt: on
-                sub_subs: Link | None = getattr(sub, "subs", None)
+                # Fresh subscriber — mark with target flag
+                sub.flags = sub_flags | target_flag | SubscriberFlags.Notified
+                should_descend = True
+            elif (sub_flags & SubscriberFlags.Recursed) and not (
+                sub_flags & SubscriberFlags.Tracking
+            ):
+                # Previously recursed, done tracking — clear recursed, apply target
+                sub.flags = (
+                    (sub_flags & ~SubscriberFlags.Recursed)
+                    | target_flag
+                    | SubscriberFlags.Notified
+                )
+                should_descend = True
+            elif not (sub_flags & SubscriberFlags.Propagated) and is_valid_link(
+                link, sub
+            ):
+                # Valid link during tracking — always set flags,
+                # but only descend if sub has downstream subscribers
+                sub.flags = (
+                    sub_flags
+                    | SubscriberFlags.Recursed
+                    | target_flag
+                    | SubscriberFlags.Notified
+                )
+                if _is_dep_sub(sub):
+                    should_descend = True
+            elif not (sub_flags & (SubscriberFlags.Tracking | target_flag)):
+                # Already propagated but missing this target flag
+                sub.flags = sub_flags | target_flag | SubscriberFlags.Notified
+                if (
+                    sub_flags & (SubscriberFlags.Effect | SubscriberFlags.Notified)
+                ) == SubscriberFlags.Effect:
+                    self._queue_effect(sub)
+            elif (
+                not (sub_flags & target_flag)
+                and (sub_flags & SubscriberFlags.Propagated)
+                and is_valid_link(link, sub)
+            ):
+                sub.flags = sub_flags | target_flag
+
+            if should_descend:
+                sub_subs: Link | None = sub.subs if _is_dep_sub(sub) else None
                 if sub_subs:
                     if sub_subs.next_sub:
                         sub_subs.prev_sub = subs
@@ -191,29 +234,9 @@ class ReactiveSystem:
                         )
                     continue
                 if sub_flags & SubscriberFlags.Effect:
-                    if self.queued_effects_tail:
-                        cast("Link", self.queued_effects_tail.deps_tail).next_dep = sub.deps  # noqa: E501
-                    else:
-                        self.queued_effects = sub
-                    self.queued_effects_tail = sub
+                    self._queue_effect(sub)
 
-            elif not (sub_flags & (SubscriberFlags.Tracking | target_flag)):
-                sub.flags = sub_flags | target_flag | SubscriberFlags.Notified
-                if (sub_flags & (SubscriberFlags.Effect | SubscriberFlags.Notified)) == SubscriberFlags.Effect:  # noqa: E501
-                    if self.queued_effects_tail:
-                        cast("Link", self.queued_effects_tail.deps_tail).next_dep = sub.deps  # noqa: E501
-                    else:
-                        self.queued_effects = sub
-                    self.queued_effects_tail = sub
-
-            elif (
-                not (sub_flags & target_flag)
-                and (sub_flags & SubscriberFlags.Propagated)
-                and is_valid_link(link, sub)
-            ):
-                sub.flags = sub_flags | target_flag
-
-            if (link := cast("Link", subs.next_sub)):
+            if link := subs.next_sub:  # type: ignore[assignment]
                 subs = link
                 target_flag = (
                     SubscriberFlags.PendingComputed if stack else SubscriberFlags.Dirty
@@ -222,11 +245,11 @@ class ReactiveSystem:
 
             while stack:
                 stack -= 1
-                dep = subs.dep
-                dep_subs = cast("Link", dep.subs)
-                subs = cast("Link", dep_subs.prev_sub)
-                dep_subs.prev_sub = None
-                if (link := cast("Link", subs.next_sub)):
+                dep = subs.dep  # ty:ignore[unresolved-attribute]
+                dep_subs = dep.subs
+                subs = dep_subs.prev_sub  # ty:ignore[unresolved-attribute]
+                dep_subs.prev_sub = None  # ty:ignore[invalid-assignment]
+                if link := subs.next_sub:  # ty:ignore[invalid-assignment, unresolved-attribute]
                     subs = link
                     target_flag = (
                         SubscriberFlags.PendingComputed
@@ -323,20 +346,16 @@ class ReactiveSystem:
         flags : SubscriberFlags
             The current flag set for this subscriber.
         """
-        if (
-            flags & SubscriberFlags.Dirty
-            or (
-                True
-                if computed.deps and self._check_dirty(computed.deps)
-                else (
-                    set_flags(computed, flags & ~SubscriberFlags.PendingComputed)
-                    and False
-                )
-            )
-        ) and self.update_computed(computed):
-            subs = computed.subs
-            if subs:
-                self._shallow_propagate(subs)
+        needs_update = bool(flags & SubscriberFlags.Dirty)
+        if not needs_update:
+            if computed.deps and self._check_dirty(computed.deps):
+                needs_update = True
+            else:
+                computed.flags = flags & ~SubscriberFlags.PendingComputed
+                return
+
+        if self.update_computed(computed) and computed.subs:
+            self._shallow_propagate(computed.subs)
 
     def process_pending_inner_effects(
         self,
@@ -351,7 +370,7 @@ class ReactiveSystem:
         on any related dependencies marked as Effect and Propagated, processing
         pending effects.
 
-        Parameters  # noqa: PLR6301
+        Parameters
         ----------
         sub : Subscriber
             The subscriber which may have pending effects.
@@ -364,11 +383,11 @@ class ReactiveSystem:
             while link:
                 dep = link.dep
                 if (
-                    hasattr(dep, "flags")
-                    and cast("Subscriber", dep).flags & SubscriberFlags.Effect
-                    and cast("Subscriber", dep).flags & SubscriberFlags.Propagated
+                    _is_dep_sub(dep)
+                    and dep.flags & SubscriberFlags.Effect
+                    and dep.flags & SubscriberFlags.Propagated
                 ):
-                    self.notify_effect(cast("Subscriber", dep))
+                    self.notify_effect(dep)
                 link = link.next_dep
 
     def process_effect_notifications(self) -> None:
@@ -380,10 +399,10 @@ class ReactiveSystem:
         """
         while self.queued_effects:
             effect = self.queued_effects
-            deps_tail = cast("Link", effect.deps_tail)
-            queued_next = deps_tail.next_dep
+            deps_tail = effect.deps_tail
+            queued_next = deps_tail.next_dep  # ty:ignore[unresolved-attribute]
             if queued_next:
-                deps_tail.next_dep = None
+                deps_tail.next_dep = None  # ty:ignore[invalid-assignment]
                 self.queued_effects = queued_next.sub
             else:
                 self.queued_effects = None
@@ -417,12 +436,12 @@ class ReactiveSystem:
             dirty = False
             dep = link.dep
 
-            if hasattr(dep, "flags"):
-                dep_flags = cast("DependencyWithSubscriber", dep).flags
+            if _is_dep_sub(dep):
+                dep_flags = dep.flags
                 if (dep_flags & (SubscriberFlags.Computed | SubscriberFlags.Dirty)) == (
                     SubscriberFlags.Computed | SubscriberFlags.Dirty
                 ):
-                    if self.update_computed(cast("DependencyWithSubscriber", dep)):
+                    if self.update_computed(dep):
                         subs = dep.subs
                         if subs and subs.next_sub:
                             self._shallow_propagate(subs)
@@ -434,7 +453,7 @@ class ReactiveSystem:
                     dep_subs = dep.subs
                     if dep_subs and dep_subs.next_sub:
                         dep_subs.prev_sub = link
-                    link: Link = dep.deps  # ty:ignore[unresolved-attribute]
+                    link = dep.deps  # type: ignore[assignment]
                     stack += 1
                     continue
 
@@ -446,11 +465,11 @@ class ReactiveSystem:
                 sub = link.sub
                 while stack:
                     stack -= 1
-                    sub_subs: Link = sub.subs  # ty:ignore[unresolved-attribute]
+                    sub_subs: Link = sub.subs  # type: ignore[assignment]
 
                     if dirty:
-                        if self.update_computed(cast("DependencyWithSubscriber", sub)):
-                            if link := cast("Link", sub_subs.prev_sub):
+                        if self.update_computed(sub):  # type: ignore[arg-type]
+                            if link := sub_subs.prev_sub:
                                 sub_subs.prev_sub = None
                                 self._shallow_propagate(sub_subs)
                                 sub = link.sub
@@ -460,15 +479,15 @@ class ReactiveSystem:
                     else:
                         sub.flags &= ~SubscriberFlags.PendingComputed
 
-                    if link := cast("Link", sub_subs.prev_sub):
+                    if link := sub_subs.prev_sub:
                         sub_subs.prev_sub = None
                         if link.next_dep:
                             link = link.next_dep
-                            break  # Restart loop
+                            break
                         sub = link.sub
                     else:
-                        if link := cast("Link", sub_subs.next_dep):
-                            break  # Restart loop
+                        if link := sub_subs.next_dep:
+                            break
                         sub = sub_subs.sub
 
                     dirty = False
@@ -496,20 +515,8 @@ class ReactiveSystem:
                 if (
                     sub_flags & (SubscriberFlags.Effect | SubscriberFlags.Notified)
                 ) == SubscriberFlags.Effect:
-                    if self.queued_effects_tail:
-                        cast(
-                            "Link",
-                            self.queued_effects_tail.deps_tail,
-                        ).next_dep = sub.deps
-                    else:
-                        self.queued_effects = sub
-                    self.queued_effects_tail = sub
-            link = cast("Link", link.next_sub)
-
-
-def set_flags(sub: Subscriber, new_flags: int) -> typing.Literal[True]:
-    sub.flags = cast("SubscriberFlags", new_flags)
-    return True
+                    self._queue_effect(sub)
+            link = link.next_sub  # type: ignore[assignment]
 
 
 def link_new_dep(
@@ -555,9 +562,9 @@ def link_new_dep(
     if dep.subs is None:
         dep.subs = new_link
     else:
-        old_tail = cast("Link", dep.subs_tail)
+        old_tail = dep.subs_tail
         new_link.prev_sub = old_tail
-        old_tail.next_sub = new_link
+        old_tail.next_sub = new_link  # ty:ignore[invalid-assignment]
 
     sub.deps_tail = new_link
     dep.subs_tail = new_link
@@ -622,17 +629,16 @@ def clear_tracking(link: Link) -> None:
         else:
             dep.subs = next_sub
 
-        if dep.subs is None and hasattr(dep, "deps"):
-            dep = cast("DependencyWithSubscriber", dep)
+        if dep.subs is None and _is_dep_sub(dep):
             dep_flags = dep.flags
             if not (dep_flags & SubscriberFlags.Dirty):
                 dep.flags = dep_flags | SubscriberFlags.Dirty
             dep_deps = dep.deps
             if dep_deps:
                 link = dep_deps
-                cast("Link", dep.deps_tail).next_dep = next_dep
+                dep.deps_tail.next_dep = next_dep  # type: ignore[union-attr]
                 dep.deps = None
                 dep.deps_tail = None
                 continue
 
-        link = cast("Link", next_dep)
+        link = next_dep  # type: ignore[assignment]
