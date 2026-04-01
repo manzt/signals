@@ -21,8 +21,6 @@ jobs:
           deno-version: v2.x
 
       - uses: astral-sh/setup-uv@v7
-        with:
-          pyproject-file: "pyproject.toml"
 
       - run: uv build
 
