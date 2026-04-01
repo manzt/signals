@@ -8,7 +8,7 @@ version = "0.1.0a5"
 description = "Primitives for transparent reactive programming in Python"
 authors = [{ name = "Trevor Manz", email = "trevor.j.manz@gmail.com" }]
 readme = "README.md"
-requires-python = ">= 3.8"
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 inputs = ["anywidget>=0.9.18"]
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [tool.uv]
-required-version = ">=0.5.0"
+required-version = ">=0.11.0"
 
 [tool.ruff.lint]
 preview = true
