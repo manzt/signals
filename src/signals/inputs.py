@@ -10,7 +10,7 @@ import pathlib
 import typing
 import weakref
 
-from ._core import Signal
+from ._core import Disposer, Signal
 
 try:
     from anywidget._descriptor import (  # noqa: PLC2701
@@ -161,6 +161,25 @@ class Input(typing.Generic[T]):
             The current value of the input.
         """
         return self._value.peek()
+
+    def subscribe(
+        self, fn: typing.Callable[[T], None], *, defer: bool = False
+    ) -> Disposer:
+        """Subscribe to input changes.
+
+        Parameters
+        ----------
+        fn : Callable[[T], None]
+            The callback function to run when the input changes.
+        defer : bool, optional
+            If `True`, defers execution until the first change. Defaults to `False`.
+
+        Returns
+        -------
+        Callable[[], None]
+            A function for unsubscribing from the underlying signal.
+        """
+        return self._value.subscribe(fn, defer=defer)
 
     def _get_anywidget_state(self, include: typing.Set[str] | None) -> dict:  # noqa: ARG002, UP006
         return {
